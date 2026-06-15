@@ -111,7 +111,7 @@ def api_list_users():
         "SELECT id, username, is_admin, created_at FROM users ORDER BY id"
     ).fetchall()
     conn.close()
-    return jsonify([dict(r) for r in rows])
+    return jsonify(rows)
 
 
 @app.route("/api/admin/users", methods=["POST"])
@@ -199,7 +199,7 @@ def get_suppliers():
         "GROUP BY s.id ORDER BY s.name"
     ).fetchall()
     conn.close()
-    return jsonify([dict(r) for r in rows])
+    return jsonify(rows)
 
 
 @app.route("/api/suppliers", methods=["POST"])
@@ -211,9 +211,8 @@ def create_supplier():
         return jsonify({"error": "Name required"}), 400
     conn = get_db()
     try:
-        conn.execute("INSERT INTO suppliers (name) VALUES (?)", (name,))
+        sid = conn.insert("INSERT INTO suppliers (name) VALUES (?)", (name,))
         conn.commit()
-        sid = conn.execute("SELECT last_insert_rowid()").fetchone()[0]
     except Exception as e:
         conn.close()
         return jsonify({"error": str(e)}), 400
@@ -241,7 +240,7 @@ def get_catalogs(sid):
         "SELECT * FROM catalogs WHERE supplier_id = ? ORDER BY uploaded_at DESC", (sid,)
     ).fetchall()
     conn.close()
-    return jsonify([dict(r) for r in rows])
+    return jsonify(rows)
 
 
 @app.route("/api/suppliers/<int:sid>/upload", methods=["POST"])
@@ -279,11 +278,10 @@ def upload_catalog(sid):
             (catalog_name, len(items), catalog_id)
         )
     else:
-        conn.execute(
+        catalog_id = conn.insert(
             "INSERT INTO catalogs (supplier_id, name, item_count) VALUES (?,?,?)",
             (sid, catalog_name, len(items))
         )
-        catalog_id = conn.execute("SELECT last_insert_rowid()").fetchone()[0]
 
     conn.executemany(
         "INSERT INTO items (supplier_id, catalog_id, code, description, unit, base_price) VALUES (?,?,?,?,?,?)",
@@ -335,7 +333,7 @@ def search_items():
     conn = get_db()
     rows = conn.execute(sql, params).fetchall()
     conn.close()
-    return jsonify([dict(r) for r in rows])
+    return jsonify(rows)
 
 
 @app.route("/api/items/<int:iid>", methods=["PUT"])
@@ -372,7 +370,7 @@ def get_supplier_items(sid):
         "WHERE i.supplier_id = ? ORDER BY i.description", (sid,)
     ).fetchall()
     conn.close()
-    return jsonify([dict(r) for r in rows])
+    return jsonify(rows)
 
 
 # ── Quotations API ─────────────────────────────────────────────────────────────
@@ -387,7 +385,7 @@ def list_quotations():
         "GROUP BY q.id ORDER BY q.id DESC"
     ).fetchall()
     conn.close()
-    return jsonify([dict(r) for r in rows])
+    return jsonify(rows)
 
 
 @app.route("/api/quotations/next-number", methods=["GET"])
@@ -402,14 +400,13 @@ def create_quotation():
     data = request.json
     conn = get_db()
     try:
-        conn.execute(
+        qid = conn.insert(
             "INSERT INTO quotations (quote_number, client_name, client_address, date, gst_rate, notes) "
             "VALUES (?,?,?,?,?,?)",
             (data["quote_number"], data["client_name"], data.get("client_address", ""),
              data["date"], float(data.get("gst_rate", 18)), data.get("notes", ""))
         )
         conn.commit()
-        qid = conn.execute("SELECT last_insert_rowid()").fetchone()[0]
         for idx, item in enumerate(data.get("items", [])):
             conn.execute(
                 "INSERT INTO quotation_items "
@@ -441,7 +438,7 @@ def get_quotation(qid):
         "SELECT * FROM quotation_items WHERE quotation_id = ? ORDER BY sort_order", (qid,)
     ).fetchall()
     conn.close()
-    return jsonify({"quotation": dict(q), "items": [dict(i) for i in items]})
+    return jsonify({"quotation": q, "items": items})
 
 
 @app.route("/api/quotations/<int:qid>", methods=["PUT"])
@@ -494,7 +491,7 @@ def export_pdf(qid):
     conn.close()
     if not q:
         return jsonify({"error": "Not found"}), 404
-    pdf_bytes = generate_pdf(dict(q), [dict(i) for i in items])
+    pdf_bytes = generate_pdf(q, items)
     return send_file(io.BytesIO(pdf_bytes), mimetype="application/pdf",
                      as_attachment=True, download_name=f"{q['quote_number']}.pdf")
 
@@ -510,7 +507,7 @@ def export_excel(qid):
     conn.close()
     if not q:
         return jsonify({"error": "Not found"}), 404
-    xl_bytes = generate_excel(dict(q), [dict(i) for i in items])
+    xl_bytes = generate_excel(q, items)
     return send_file(io.BytesIO(xl_bytes),
                      mimetype="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
                      as_attachment=True, download_name=f"{q['quote_number']}.xlsx")
