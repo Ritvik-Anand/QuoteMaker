@@ -193,6 +193,28 @@ textarea.input { resize: vertical; }
 /* ── Drag handle ── */
 .drag-handle { color: #ccc; cursor: grab; user-select: none; font-size: 14px; padding: 0 4px; }
 
+/* ── User menu ── */
+.nav-user { position: relative; }
+.nav-avatar { width: 32px; height: 32px; border-radius: 50%; background: rgba(255,255,255,.25); color: #fff; font-weight: 700; font-size: 14px; display: flex; align-items: center; justify-content: center; cursor: pointer; user-select: none; transition: background .15s; }
+.nav-avatar:hover { background: rgba(255,255,255,.35); }
+.user-menu { position: absolute; right: 0; top: calc(100% + 10px); background: var(--card); border: 1px solid var(--border); border-radius: 8px; box-shadow: 0 8px 24px rgba(0,0,0,.12); min-width: 180px; z-index: 200; overflow: hidden; }
+.user-menu.hidden { display: none; }
+.user-menu-name { padding: 10px 14px; font-size: 12px; font-weight: 600; color: var(--text-muted); border-bottom: 1px solid var(--border); }
+.user-menu-item { display: block; padding: 9px 14px; font-size: 13px; color: var(--text); text-decoration: none; transition: background .12s; }
+.user-menu-item:hover { background: var(--bg); }
+.user-menu-item.danger { color: var(--danger); border-top: 1px solid var(--border); }
+
+/* ── Banners ── */
+.error-banner { background: #fee2e2; color: #991b1b; border-radius: 6px; padding: 10px 14px; font-size: 13px; }
+.success-banner { background: #dcfce7; color: #166534; border-radius: 6px; padding: 10px 14px; font-size: 13px; }
+
+/* ── Admin badge ── */
+.badge-admin { background: #fef3c7; color: #92400e; }
+
+/* ── Checkbox label ── */
+.checkbox-label { display: flex; align-items: center; gap: 8px; font-size: 13px; cursor: pointer; }
+.checkbox-label input { width: 15px; height: 15px; cursor: pointer; }
+
 @media (max-width: 768px) {
   .quote-layout { flex-direction: column; }
   .quote-sidebar { width: 100%; }

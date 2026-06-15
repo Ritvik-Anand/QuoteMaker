@@ -1,0 +1,161 @@
+{% extends "base.html" %}
+{% block title %}Manage Users{% endblock %}
+{% block content %}
+<div class="page-header">
+  <h1>Manage Users</h1>
+  <button class="btn btn-primary" onclick="showAddUser()">+ Add User</button>
+</div>
+
+<div class="card">
+  <table class="data-table">
+    <thead>
+      <tr><th>Username</th><th>Role</th><th>Created</th><th>Actions</th></tr>
+    </thead>
+    <tbody id="users-tbody">
+      <tr><td colspan="4" class="empty-state">Loading…</td></tr>
+    </tbody>
+  </table>
+</div>
+
+<!-- Add User Modal -->
+<div id="modal-add-user" class="modal hidden">
+  <div class="modal-box">
+    <div class="modal-header">
+      <h3>Add User</h3>
+      <button class="btn-icon" onclick="closeModal('modal-add-user')">✕</button>
+    </div>
+    <div style="display:flex;flex-direction:column;gap:12px;margin-top:8px">
+      <div class="form-group">
+        <label>Username</label>
+        <input type="text" id="new-username" class="input" placeholder="e.g. rahul" autocomplete="off"/>
+      </div>
+      <div class="form-group">
+        <label>Password</label>
+        <input type="password" id="new-password" class="input" placeholder="Min 6 characters" autocomplete="new-password"/>
+      </div>
+      <label class="checkbox-label">
+        <input type="checkbox" id="new-is-admin" />
+        <span>Admin (can manage users and suppliers)</span>
+      </label>
+    </div>
+    <div id="add-user-error" class="error-banner" style="display:none;margin-top:10px"></div>
+    <div class="modal-actions" style="margin-top:16px">
+      <button class="btn btn-outline" onclick="closeModal('modal-add-user')">Cancel</button>
+      <button class="btn btn-primary" onclick="addUser()">Create User</button>
+    </div>
+  </div>
+</div>
+
+<!-- Reset Password Modal -->
+<div id="modal-reset-pw" class="modal hidden">
+  <div class="modal-box">
+    <div class="modal-header">
+      <h3 id="reset-pw-title">Reset Password</h3>
+      <button class="btn-icon" onclick="closeModal('modal-reset-pw')">✕</button>
+    </div>
+    <div style="margin-top:12px">
+      <div class="form-group">
+        <label>New Password</label>
+        <input type="password" id="reset-pw-value" class="input" placeholder="Min 6 characters" autocomplete="new-password"/>
+      </div>
+    </div>
+    <div id="reset-pw-error" class="error-banner" style="display:none;margin-top:10px"></div>
+    <div class="modal-actions" style="margin-top:16px">
+      <button class="btn btn-outline" onclick="closeModal('modal-reset-pw')">Cancel</button>
+      <button class="btn btn-primary" onclick="doResetPassword()">Set Password</button>
+    </div>
+  </div>
+</div>
+{% endblock %}
+{% block scripts %}
+<script>
+let resetUserId = null;
+
+async function loadUsers() {
+  const users = await fetch('/api/admin/users').then(r => r.json());
+  const tbody = document.getElementById('users-tbody');
+  if (!users.length) {
+    tbody.innerHTML = '<tr><td colspan="4" class="empty-state">No users yet</td></tr>';
+    return;
+  }
+  tbody.innerHTML = users.map(u => `
+    <tr>
+      <td><strong>${esc(u.username)}</strong></td>
+      <td><span class="badge ${u.is_admin ? 'badge-admin' : ''}">${u.is_admin ? 'Admin' : 'Staff'}</span></td>
+      <td style="color:var(--text-muted);font-size:12px">${u.created_at.substring(0,10)}</td>
+      <td class="actions-cell">
+        <button class="btn btn-sm" onclick="showResetPw(${u.id}, '${esc(u.username)}')">Reset Password</button>
+        <button class="btn btn-sm btn-danger" onclick="deleteUser(${u.id}, '${esc(u.username)}')">Delete</button>
+      </td>
+    </tr>
+  `).join('');
+}
+
+function showAddUser() {
+  document.getElementById('new-username').value = '';
+  document.getElementById('new-password').value = '';
+  document.getElementById('new-is-admin').checked = false;
+  document.getElementById('add-user-error').style.display = 'none';
+  showModal('modal-add-user');
+  setTimeout(() => document.getElementById('new-username').focus(), 100);
+}
+
+async function addUser() {
+  const username = document.getElementById('new-username').value.trim();
+  const password = document.getElementById('new-password').value;
+  const is_admin = document.getElementById('new-is-admin').checked;
+  const errEl = document.getElementById('add-user-error');
+  errEl.style.display = 'none';
+  const r = await fetch('/api/admin/users', {
+    method: 'POST', headers: {'Content-Type': 'application/json'},
+    body: JSON.stringify({username, password, is_admin})
+  });
+  const data = await r.json();
+  if (data.error) {
+    errEl.textContent = data.error;
+    errEl.style.display = '';
+    return;
+  }
+  closeModal('modal-add-user');
+  loadUsers();
+}
+
+async function deleteUser(id, name) {
+  if (!confirm(`Delete user "${name}"? They will immediately lose access.`)) return;
+  const r = await fetch(`/api/admin/users/${id}`, {method: 'DELETE'});
+  const data = await r.json();
+  if (data.error) { alert(data.error); return; }
+  loadUsers();
+}
+
+function showResetPw(id, name) {
+  resetUserId = id;
+  document.getElementById('reset-pw-title').textContent = `Reset Password — ${name}`;
+  document.getElementById('reset-pw-value').value = '';
+  document.getElementById('reset-pw-error').style.display = 'none';
+  showModal('modal-reset-pw');
+  setTimeout(() => document.getElementById('reset-pw-value').focus(), 100);
+}
+
+async function doResetPassword() {
+  const password = document.getElementById('reset-pw-value').value;
+  const errEl = document.getElementById('reset-pw-error');
+  errEl.style.display = 'none';
+  const r = await fetch(`/api/admin/users/${resetUserId}/reset-password`, {
+    method: 'POST', headers: {'Content-Type': 'application/json'},
+    body: JSON.stringify({password})
+  });
+  const data = await r.json();
+  if (data.error) {
+    errEl.textContent = data.error;
+    errEl.style.display = '';
+    return;
+  }
+  closeModal('modal-reset-pw');
+  showToast('Password reset successfully');
+}
+
+function esc(s) { return String(s||'').replace(/&/g,'&amp;').replace(/"/g,'&quot;').replace(/</g,'&lt;'); }
+loadUsers();
+</script>
+{% endblock %}

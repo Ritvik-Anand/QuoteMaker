@@ -18,6 +18,17 @@
       <a href="/catalogs" class="nav-link {% if request.path == '/catalogs' %}active{% endif %}">Catalogs</a>
       <a href="/history" class="nav-link {% if request.path == '/history' %}active{% endif %}">History</a>
       <a href="/quotation/new" class="btn btn-primary">+ New Quote</a>
+      <div class="nav-user">
+        <div class="nav-avatar" onclick="toggleUserMenu()">{{ session.username[0].upper() }}</div>
+        <div class="user-menu hidden" id="user-menu">
+          <div class="user-menu-name">{{ session.username }}</div>
+          {% if session.is_admin %}
+          <a href="/admin/users" class="user-menu-item">Manage Users</a>
+          {% endif %}
+          <a href="/change-password" class="user-menu-item">Change Password</a>
+          <a href="/logout" class="user-menu-item danger">Sign Out</a>
+        </div>
+      </div>
     </div>
   </nav>
   <main class="main">

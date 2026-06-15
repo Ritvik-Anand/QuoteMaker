@@ -1,24 +1,32 @@
 import os
 import json
+import secrets
 from datetime import date
 from pathlib import Path
+from flask import (
+    Flask, request, jsonify, render_template,
+    send_file, session, redirect, url_for, flash
+)
+import io
 
-# Load .env from project root
+# Load .env from project root (local dev only)
 _env = Path(__file__).parent / ".env"
 if _env.exists():
     for _line in _env.read_text().splitlines():
         if _line.strip() and not _line.startswith("#") and "=" in _line:
             _k, _v = _line.split("=", 1)
             os.environ.setdefault(_k.strip(), _v.strip())
-from flask import Flask, request, jsonify, render_template, send_file
-import io
 
 from database import init_db, get_db
 from pdf_parser import parse_catalog_pdf
 from export import generate_pdf, generate_excel
+from auth import login_required, admin_required, verify_user, create_user, change_password
 
 app = Flask(__name__)
+app.secret_key = os.environ.get("SECRET_KEY", secrets.token_hex(32))
 app.config["MAX_CONTENT_LENGTH"] = 50 * 1024 * 1024  # 50 MB
+app.config["SESSION_COOKIE_HTTPONLY"] = True
+app.config["SESSION_COOKIE_SAMESITE"] = "Lax"
 
 
 def _next_quote_number():
@@ -28,8 +36,7 @@ def _next_quote_number():
     ).fetchone()
     conn.close()
     if not row:
-        year = date.today().year
-        return f"BM-{year}-001"
+        return f"BM-{date.today().year}-001"
     last = row["quote_number"]
     parts = last.rsplit("-", 1)
     try:
@@ -39,29 +46,143 @@ def _next_quote_number():
         return f"BM-{date.today().year}-001"
 
 
-# ── Pages ─────────────────────────────────────────────────────────────────────
+# ── Auth pages ─────────────────────────────────────────────────────────────────
+
+@app.route("/login", methods=["GET"])
+def login_page():
+    if session.get("user_id"):
+        return redirect(url_for("index"))
+    return render_template("login.html")
+
+
+@app.route("/login", methods=["POST"])
+def login_post():
+    username = request.form.get("username", "").strip()
+    password = request.form.get("password", "")
+    user = verify_user(username, password)
+    if not user:
+        return render_template("login.html", error="Invalid username or password.")
+    session.clear()
+    session["user_id"] = user["id"]
+    session["username"] = user["username"]
+    session["is_admin"] = bool(user["is_admin"])
+    next_url = request.args.get("next") or url_for("index")
+    return redirect(next_url)
+
+
+@app.route("/logout")
+def logout():
+    session.clear()
+    return redirect(url_for("login_page"))
+
+
+@app.route("/change-password", methods=["GET", "POST"])
+@login_required
+def change_password_page():
+    if request.method == "POST":
+        current = request.form.get("current_password", "")
+        new_pw = request.form.get("new_password", "")
+        confirm = request.form.get("confirm_password", "")
+        user = verify_user(session["username"], current)
+        if not user:
+            return render_template("change_password.html", error="Current password is wrong.")
+        if len(new_pw) < 6:
+            return render_template("change_password.html", error="New password must be at least 6 characters.")
+        if new_pw != confirm:
+            return render_template("change_password.html", error="Passwords do not match.")
+        change_password(session["user_id"], new_pw)
+        return render_template("change_password.html", success="Password changed successfully.")
+    return render_template("change_password.html")
+
+
+# ── Admin ──────────────────────────────────────────────────────────────────────
+
+@app.route("/admin/users")
+@admin_required
+def admin_users_page():
+    return render_template("admin_users.html")
+
+
+@app.route("/api/admin/users", methods=["GET"])
+@admin_required
+def api_list_users():
+    conn = get_db()
+    rows = conn.execute(
+        "SELECT id, username, is_admin, created_at FROM users ORDER BY id"
+    ).fetchall()
+    conn.close()
+    return jsonify([dict(r) for r in rows])
+
+
+@app.route("/api/admin/users", methods=["POST"])
+@admin_required
+def api_create_user():
+    data = request.json
+    username = (data.get("username") or "").strip()
+    password = (data.get("password") or "").strip()
+    is_admin = bool(data.get("is_admin", False))
+    if not username or not password:
+        return jsonify({"error": "Username and password required"}), 400
+    if len(password) < 6:
+        return jsonify({"error": "Password must be at least 6 characters"}), 400
+    try:
+        create_user(username, password, is_admin)
+    except Exception as e:
+        return jsonify({"error": str(e)}), 400
+    return jsonify({"ok": True})
+
+
+@app.route("/api/admin/users/<int:uid>", methods=["DELETE"])
+@admin_required
+def api_delete_user(uid):
+    if uid == session["user_id"]:
+        return jsonify({"error": "Cannot delete your own account"}), 400
+    conn = get_db()
+    conn.execute("DELETE FROM users WHERE id = ?", (uid,))
+    conn.commit()
+    conn.close()
+    return jsonify({"ok": True})
+
+
+@app.route("/api/admin/users/<int:uid>/reset-password", methods=["POST"])
+@admin_required
+def api_reset_password(uid):
+    data = request.json
+    new_pw = (data.get("password") or "").strip()
+    if len(new_pw) < 6:
+        return jsonify({"error": "Password must be at least 6 characters"}), 400
+    change_password(uid, new_pw)
+    return jsonify({"ok": True})
+
+
+# ── Pages ──────────────────────────────────────────────────────────────────────
 
 @app.route("/")
+@login_required
 def index():
     return render_template("index.html")
 
 
 @app.route("/catalogs")
+@login_required
 def catalogs_page():
     return render_template("catalogs.html")
 
 
 @app.route("/quotation/new")
+@login_required
 def new_quotation_page():
     return render_template("quotation.html")
 
 
 @app.route("/quotation/<int:qid>/edit")
+@login_required
 def edit_quotation_page(qid):
     return render_template("quotation.html", qid=qid)
 
 
 @app.route("/history")
+@login_required
 def history_page():
     return render_template("history.html")
 
@@ -69,6 +190,7 @@ def history_page():
 # ── Suppliers API ──────────────────────────────────────────────────────────────
 
 @app.route("/api/suppliers", methods=["GET"])
+@login_required
 def get_suppliers():
     conn = get_db()
     rows = conn.execute(
@@ -81,6 +203,7 @@ def get_suppliers():
 
 
 @app.route("/api/suppliers", methods=["POST"])
+@login_required
 def create_supplier():
     data = request.json
     name = (data.get("name") or "").strip()
@@ -99,6 +222,7 @@ def create_supplier():
 
 
 @app.route("/api/suppliers/<int:sid>", methods=["DELETE"])
+@login_required
 def delete_supplier(sid):
     conn = get_db()
     conn.execute("DELETE FROM suppliers WHERE id = ?", (sid,))
@@ -107,9 +231,10 @@ def delete_supplier(sid):
     return jsonify({"ok": True})
 
 
-# ── Catalog API ───────────────────────────────────────────────────────────────
+# ── Catalog API ────────────────────────────────────────────────────────────────
 
 @app.route("/api/suppliers/<int:sid>/catalogs", methods=["GET"])
+@login_required
 def get_catalogs(sid):
     conn = get_db()
     rows = conn.execute(
@@ -120,6 +245,7 @@ def get_catalogs(sid):
 
 
 @app.route("/api/suppliers/<int:sid>/upload", methods=["POST"])
+@login_required
 def upload_catalog(sid):
     conn = get_db()
     supplier = conn.execute("SELECT * FROM suppliers WHERE id = ?", (sid,)).fetchone()
@@ -134,7 +260,7 @@ def upload_catalog(sid):
         return jsonify({"error": "Only PDF files are supported"}), 400
 
     catalog_name = request.form.get("catalog_name", "").strip() or f.filename
-    catalog_id = request.form.get("catalog_id", "").strip()  # set when re-uploading
+    catalog_id = request.form.get("catalog_id", "").strip()
 
     pdf_bytes = f.read()
     try:
@@ -147,14 +273,12 @@ def upload_catalog(sid):
 
     conn = get_db()
     if catalog_id:
-        # Re-upload: replace items for this catalog only
         conn.execute("DELETE FROM items WHERE catalog_id = ?", (catalog_id,))
         conn.execute(
             "UPDATE catalogs SET name=?, item_count=?, uploaded_at=CURRENT_TIMESTAMP WHERE id=?",
             (catalog_name, len(items), catalog_id)
         )
     else:
-        # New catalog
         conn.execute(
             "INSERT INTO catalogs (supplier_id, name, item_count) VALUES (?,?,?)",
             (sid, catalog_name, len(items))
@@ -167,22 +291,23 @@ def upload_catalog(sid):
     )
     conn.commit()
     conn.close()
-
     return jsonify({"imported": len(items), "catalog_id": catalog_id, "catalog_name": catalog_name})
 
 
 @app.route("/api/catalogs/<int:cid>", methods=["DELETE"])
+@login_required
 def delete_catalog(cid):
     conn = get_db()
-    conn.execute("DELETE FROM catalogs WHERE id = ?", (cid,))  # items cascade
+    conn.execute("DELETE FROM catalogs WHERE id = ?", (cid,))
     conn.commit()
     conn.close()
     return jsonify({"ok": True})
 
 
-# ── Items API ─────────────────────────────────────────────────────────────────
+# ── Items API ──────────────────────────────────────────────────────────────────
 
 @app.route("/api/items", methods=["GET"])
+@login_required
 def search_items():
     q = request.args.get("q", "").strip()
     supplier_id = request.args.get("supplier_id")
@@ -190,8 +315,7 @@ def search_items():
 
     sql = (
         "SELECT i.id, i.code, i.description, i.unit, i.base_price, i.catalog_id, "
-        "s.id as supplier_id, s.name as supplier_name, "
-        "c.name as catalog_name "
+        "s.id as supplier_id, s.name as supplier_name, c.name as catalog_name "
         "FROM items i JOIN suppliers s ON s.id = i.supplier_id "
         "LEFT JOIN catalogs c ON c.id = i.catalog_id "
     )
@@ -215,6 +339,7 @@ def search_items():
 
 
 @app.route("/api/items/<int:iid>", methods=["PUT"])
+@login_required
 def update_item(iid):
     data = request.json
     conn = get_db()
@@ -228,6 +353,7 @@ def update_item(iid):
 
 
 @app.route("/api/items/<int:iid>", methods=["DELETE"])
+@login_required
 def delete_item(iid):
     conn = get_db()
     conn.execute("DELETE FROM items WHERE id = ?", (iid,))
@@ -237,6 +363,7 @@ def delete_item(iid):
 
 
 @app.route("/api/suppliers/<int:sid>/items", methods=["GET"])
+@login_required
 def get_supplier_items(sid):
     conn = get_db()
     rows = conn.execute(
@@ -251,6 +378,7 @@ def get_supplier_items(sid):
 # ── Quotations API ─────────────────────────────────────────────────────────────
 
 @app.route("/api/quotations", methods=["GET"])
+@login_required
 def list_quotations():
     conn = get_db()
     rows = conn.execute(
@@ -263,11 +391,13 @@ def list_quotations():
 
 
 @app.route("/api/quotations/next-number", methods=["GET"])
+@login_required
 def next_quote_number():
     return jsonify({"quote_number": _next_quote_number()})
 
 
 @app.route("/api/quotations", methods=["POST"])
+@login_required
 def create_quotation():
     data = request.json
     conn = get_db()
@@ -275,37 +405,21 @@ def create_quotation():
         conn.execute(
             "INSERT INTO quotations (quote_number, client_name, client_address, date, gst_rate, notes) "
             "VALUES (?,?,?,?,?,?)",
-            (
-                data["quote_number"],
-                data["client_name"],
-                data.get("client_address", ""),
-                data["date"],
-                float(data.get("gst_rate", 18)),
-                data.get("notes", ""),
-            )
+            (data["quote_number"], data["client_name"], data.get("client_address", ""),
+             data["date"], float(data.get("gst_rate", 18)), data.get("notes", ""))
         )
         conn.commit()
         qid = conn.execute("SELECT last_insert_rowid()").fetchone()[0]
-
         for idx, item in enumerate(data.get("items", [])):
             conn.execute(
                 "INSERT INTO quotation_items "
                 "(quotation_id, item_id, description, code, unit, quantity, base_price, "
                 "adjustment_type, adjustment_value, final_price, sort_order) "
                 "VALUES (?,?,?,?,?,?,?,?,?,?,?)",
-                (
-                    qid,
-                    item.get("item_id"),
-                    item["description"],
-                    item.get("code", ""),
-                    item.get("unit", "Nos"),
-                    float(item["quantity"]),
-                    float(item["base_price"]),
-                    item.get("adjustment_type", "none"),
-                    float(item.get("adjustment_value", 0)),
-                    float(item["final_price"]),
-                    idx,
-                )
+                (qid, item.get("item_id"), item["description"], item.get("code", ""),
+                 item.get("unit", "Nos"), float(item["quantity"]), float(item["base_price"]),
+                 item.get("adjustment_type", "none"), float(item.get("adjustment_value", 0)),
+                 float(item["final_price"]), idx)
             )
         conn.commit()
     except Exception as e:
@@ -316,6 +430,7 @@ def create_quotation():
 
 
 @app.route("/api/quotations/<int:qid>", methods=["GET"])
+@login_required
 def get_quotation(qid):
     conn = get_db()
     q = conn.execute("SELECT * FROM quotations WHERE id = ?", (qid,)).fetchone()
@@ -330,6 +445,7 @@ def get_quotation(qid):
 
 
 @app.route("/api/quotations/<int:qid>", methods=["PUT"])
+@login_required
 def update_quotation(qid):
     data = request.json
     conn = get_db()
@@ -345,19 +461,10 @@ def update_quotation(qid):
             "(quotation_id, item_id, description, code, unit, quantity, base_price, "
             "adjustment_type, adjustment_value, final_price, sort_order) "
             "VALUES (?,?,?,?,?,?,?,?,?,?,?)",
-            (
-                qid,
-                item.get("item_id"),
-                item["description"],
-                item.get("code", ""),
-                item.get("unit", "Nos"),
-                float(item["quantity"]),
-                float(item["base_price"]),
-                item.get("adjustment_type", "none"),
-                float(item.get("adjustment_value", 0)),
-                float(item["final_price"]),
-                idx,
-            )
+            (qid, item.get("item_id"), item["description"], item.get("code", ""),
+             item.get("unit", "Nos"), float(item["quantity"]), float(item["base_price"]),
+             item.get("adjustment_type", "none"), float(item.get("adjustment_value", 0)),
+             float(item["final_price"]), idx)
         )
     conn.commit()
     conn.close()
@@ -365,6 +472,7 @@ def update_quotation(qid):
 
 
 @app.route("/api/quotations/<int:qid>", methods=["DELETE"])
+@login_required
 def delete_quotation(qid):
     conn = get_db()
     conn.execute("DELETE FROM quotations WHERE id = ?", (qid,))
@@ -376,6 +484,7 @@ def delete_quotation(qid):
 # ── Export API ─────────────────────────────────────────────────────────────────
 
 @app.route("/api/quotations/<int:qid>/export/pdf")
+@login_required
 def export_pdf(qid):
     conn = get_db()
     q = conn.execute("SELECT * FROM quotations WHERE id = ?", (qid,)).fetchone()
@@ -386,15 +495,12 @@ def export_pdf(qid):
     if not q:
         return jsonify({"error": "Not found"}), 404
     pdf_bytes = generate_pdf(dict(q), [dict(i) for i in items])
-    return send_file(
-        io.BytesIO(pdf_bytes),
-        mimetype="application/pdf",
-        as_attachment=True,
-        download_name=f"{q['quote_number']}.pdf",
-    )
+    return send_file(io.BytesIO(pdf_bytes), mimetype="application/pdf",
+                     as_attachment=True, download_name=f"{q['quote_number']}.pdf")
 
 
 @app.route("/api/quotations/<int:qid>/export/excel")
+@login_required
 def export_excel(qid):
     conn = get_db()
     q = conn.execute("SELECT * FROM quotations WHERE id = ?", (qid,)).fetchone()
@@ -405,14 +511,11 @@ def export_excel(qid):
     if not q:
         return jsonify({"error": "Not found"}), 404
     xl_bytes = generate_excel(dict(q), [dict(i) for i in items])
-    return send_file(
-        io.BytesIO(xl_bytes),
-        mimetype="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-        as_attachment=True,
-        download_name=f"{q['quote_number']}.xlsx",
-    )
+    return send_file(io.BytesIO(xl_bytes),
+                     mimetype="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                     as_attachment=True, download_name=f"{q['quote_number']}.xlsx")
 
 
 if __name__ == "__main__":
     init_db()
-    app.run(debug=True, port=5050)
+    app.run(debug=False, port=5050)

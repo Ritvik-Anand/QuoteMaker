@@ -1,0 +1,43 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8"/>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+  <title>Login — Bagula Mukhi</title>
+  <link rel="stylesheet" href="/static/style.css"/>
+  <style>
+    body { display: flex; align-items: center; justify-content: center; min-height: 100vh; background: var(--bg); }
+    .login-box { background: var(--card); border-radius: 12px; box-shadow: 0 4px 24px rgba(0,0,0,.12); padding: 40px 36px; width: 360px; }
+    .login-logo { text-align: center; margin-bottom: 28px; }
+    .login-logo .icon { font-size: 40px; }
+    .login-logo h1 { font-size: 22px; font-weight: 800; color: var(--brand); margin-top: 8px; }
+    .login-logo p { font-size: 12px; color: var(--text-muted); margin-top: 2px; }
+    .login-form { display: flex; flex-direction: column; gap: 14px; }
+    .login-form label { font-size: 12px; font-weight: 600; color: var(--text-muted); text-transform: uppercase; letter-spacing: .4px; display: block; margin-bottom: 5px; }
+    .error-banner { background: #fee2e2; color: #991b1b; border-radius: 6px; padding: 10px 14px; font-size: 13px; }
+  </style>
+</head>
+<body>
+  <div class="login-box">
+    <div class="login-logo">
+      <div class="icon">⚡</div>
+      <h1>Bagula Mukhi</h1>
+      <p>Quotation Maker — Sign in to continue</p>
+    </div>
+    {% if error %}
+    <div class="error-banner">{{ error }}</div>
+    {% endif %}
+    <form method="POST" class="login-form">
+      <div>
+        <label>Username</label>
+        <input type="text" name="username" class="input" autofocus autocomplete="username" required />
+      </div>
+      <div>
+        <label>Password</label>
+        <input type="password" name="password" class="input" autocomplete="current-password" required />
+      </div>
+      <button type="submit" class="btn btn-primary btn-block" style="margin-top:6px">Sign In</button>
+    </form>
+  </div>
+</body>
+</html>
