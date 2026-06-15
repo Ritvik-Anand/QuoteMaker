@@ -1,0 +1,403 @@
+{% extends "base.html" %}
+{% block title %}Quotation{% endblock %}
+{% block content %}
+<div class="page-header">
+  <h1 id="page-title">New Quotation</h1>
+  <div class="header-actions">
+    <button class="btn btn-outline" onclick="saveQuotation()">💾 Save</button>
+    <button class="btn btn-outline" id="btn-export-pdf" style="display:none" onclick="exportQuote('pdf')">⬇ PDF</button>
+    <button class="btn btn-outline" id="btn-export-excel" style="display:none" onclick="exportQuote('excel')">⬇ Excel</button>
+  </div>
+</div>
+
+<div class="quote-layout">
+  <!-- Left: details + items -->
+  <div class="quote-main">
+
+    <!-- Quote details -->
+    <div class="card">
+      <h2 class="card-title">Quote Details</h2>
+      <div class="form-grid">
+        <div class="form-group">
+          <label>Quote Number</label>
+          <input type="text" id="quote-number" class="input" placeholder="Auto-generated" />
+        </div>
+        <div class="form-group">
+          <label>Date</label>
+          <input type="date" id="quote-date" class="input" />
+        </div>
+        <div class="form-group">
+          <label>Client Name</label>
+          <input type="text" id="client-name" class="input" placeholder="Client / Company name" />
+        </div>
+        <div class="form-group">
+          <label>GST Rate (%)</label>
+          <input type="number" id="gst-rate" class="input" value="18" min="0" max="100" step="0.5" oninput="updateTotals()" />
+        </div>
+        <div class="form-group full-width">
+          <label>Client Address <span class="opt">(optional)</span></label>
+          <textarea id="client-address" class="input" rows="2" placeholder="Address shown on quotation"></textarea>
+        </div>
+        <div class="form-group full-width">
+          <label>Notes <span class="opt">(optional)</span></label>
+          <textarea id="quote-notes" class="input" rows="2" placeholder="Terms, validity, payment terms…"></textarea>
+        </div>
+      </div>
+    </div>
+
+    <!-- Items -->
+    <div class="card">
+      <div class="card-header">
+        <h2 class="card-title">Items</h2>
+        <div class="global-adj">
+          <span>Apply to all:</span>
+          <select id="global-adj-type" class="input-sm">
+            <option value="none">— No change —</option>
+            <option value="markup">Markup %</option>
+            <option value="discount">Discount %</option>
+          </select>
+          <input type="number" id="global-adj-value" class="input-sm narrow" placeholder="%" min="0" max="100" step="0.5" />
+          <button class="btn btn-sm" onclick="applyGlobal()">Apply</button>
+        </div>
+      </div>
+
+      <div class="item-search-bar">
+        <input type="text" id="item-search" class="input" placeholder="Search items by name or code…" oninput="searchItems()" autocomplete="off" />
+        <select id="supplier-filter" class="input" onchange="searchItems()">
+          <option value="">All suppliers</option>
+        </select>
+        <button class="btn btn-sm" onclick="addManualItem()">+ Manual</button>
+      </div>
+      <div id="search-results" class="search-results hidden"></div>
+
+      <div class="items-table-wrap">
+        <table class="data-table items-table">
+          <thead>
+            <tr>
+              <th style="width:24px"></th>
+              <th>Description</th>
+              <th style="width:60px">Unit</th>
+              <th style="width:60px">Qty</th>
+              <th style="width:110px">Base ₹</th>
+              <th style="width:140px">Adjustment</th>
+              <th style="width:100px">Final ₹</th>
+              <th style="width:100px">Amount ₹</th>
+              <th style="width:28px"></th>
+            </tr>
+          </thead>
+          <tbody id="items-tbody"></tbody>
+        </table>
+        <div id="items-empty" class="empty-state">Search and add items above, or click "+ Manual" for a custom line.</div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Right: totals panel -->
+  <div class="quote-sidebar">
+    <div class="card totals-card sticky-top">
+      <h2 class="card-title">Summary</h2>
+      <div class="totals">
+        <div class="total-row"><span>Subtotal</span><span id="t-subtotal">₹ 0.00</span></div>
+        <div class="total-row"><span id="t-gst-label">GST (18%)</span><span id="t-gst">₹ 0.00</span></div>
+        <div class="total-row total-grand"><span>TOTAL</span><span id="t-total">₹ 0.00</span></div>
+      </div>
+      <div class="sidebar-actions">
+        <button class="btn btn-primary btn-block" onclick="saveQuotation()">💾 Save Quotation</button>
+        <div id="export-btns" style="display:none">
+          <button class="btn btn-outline btn-block" onclick="exportQuote('pdf')">⬇ Download PDF</button>
+          <button class="btn btn-outline btn-block" onclick="exportQuote('excel')">⬇ Download Excel</button>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+{% endblock %}
+{% block scripts %}
+<script>
+const QID = {{ qid|default('null') }};
+let quoteItems = [];
+let searchTimeout = null;
+
+// ── Init ──────────────────────────────────────────────────────────────────────
+async function init() {
+  document.getElementById('quote-date').value = new Date().toISOString().split('T')[0];
+
+  const suppliers = await fetch('/api/suppliers').then(r => r.json());
+  const sel = document.getElementById('supplier-filter');
+  suppliers.forEach(s => {
+    const o = document.createElement('option');
+    o.value = s.id; o.textContent = s.name;
+    sel.appendChild(o);
+  });
+
+  if (QID) {
+    document.getElementById('page-title').textContent = 'Edit Quotation';
+    document.getElementById('btn-export-pdf').style.display = '';
+    document.getElementById('btn-export-excel').style.display = '';
+    document.getElementById('export-btns').style.display = '';
+    const data = await fetch(`/api/quotations/${QID}`).then(r => r.json());
+    const q = data.quotation;
+    document.getElementById('quote-number').value = q.quote_number;
+    document.getElementById('quote-date').value = q.date;
+    document.getElementById('client-name').value = q.client_name;
+    document.getElementById('client-address').value = q.client_address || '';
+    document.getElementById('gst-rate').value = q.gst_rate;
+    document.getElementById('quote-notes').value = q.notes || '';
+    quoteItems = data.items.map(i => ({...i}));
+    renderItems();
+    updateTotals();
+  } else {
+    const nb = await fetch('/api/quotations/next-number').then(r => r.json());
+    document.getElementById('quote-number').value = nb.quote_number;
+  }
+}
+
+// ── Search ────────────────────────────────────────────────────────────────────
+function searchItems() {
+  clearTimeout(searchTimeout);
+  const q = document.getElementById('item-search').value.trim();
+  if (q.length < 2) { hideResults(); return; }
+  searchTimeout = setTimeout(async () => {
+    const sid = document.getElementById('supplier-filter').value;
+    const url = `/api/items?q=${encodeURIComponent(q)}&limit=30${sid ? '&supplier_id='+sid : ''}`;
+    const items = await fetch(url).then(r => r.json());
+    showResults(items);
+  }, 250);
+}
+
+function showResults(items) {
+  const el = document.getElementById('search-results');
+  if (!items.length) {
+    el.innerHTML = '<div class="sr-empty">No items found</div>';
+    el.classList.remove('hidden');
+    return;
+  }
+  el.innerHTML = items.map(i => `
+    <div class="sr-item" onclick="addItem(${JSON.stringify(i).replace(/"/g,'&quot;')})">
+      <div class="sr-desc">${i.description}</div>
+      <div class="sr-meta">
+        <span class="sr-supplier">${i.supplier_name}</span>
+        ${i.code ? `<span class="sr-code">${i.code}</span>` : ''}
+        <span class="sr-price">₹ ${i.base_price.toLocaleString('en-IN', {minimumFractionDigits:2})}</span>
+      </div>
+    </div>
+  `).join('');
+  el.classList.remove('hidden');
+}
+
+function hideResults() {
+  document.getElementById('search-results').classList.add('hidden');
+}
+
+document.addEventListener('click', e => {
+  if (!e.target.closest('.item-search-bar') && !e.target.closest('.search-results')) hideResults();
+});
+
+// ── Add / Edit items ──────────────────────────────────────────────────────────
+function addItem(item) {
+  quoteItems.push({
+    item_id: item.id,
+    description: item.description,
+    code: item.code || '',
+    unit: item.unit || 'Nos',
+    quantity: 1,
+    base_price: item.base_price,
+    adjustment_type: 'none',
+    adjustment_value: 0,
+    final_price: item.base_price,
+  });
+  renderItems();
+  updateTotals();
+  hideResults();
+  document.getElementById('item-search').value = '';
+}
+
+function addManualItem() {
+  quoteItems.push({
+    item_id: null,
+    description: '',
+    code: '',
+    unit: 'Nos',
+    quantity: 1,
+    base_price: 0,
+    adjustment_type: 'none',
+    adjustment_value: 0,
+    final_price: 0,
+  });
+  renderItems();
+  updateTotals();
+  // focus last description
+  const rows = document.querySelectorAll('#items-tbody tr');
+  if (rows.length) rows[rows.length-1].querySelector('.desc-input')?.focus();
+}
+
+function removeItem(idx) {
+  quoteItems.splice(idx, 1);
+  renderItems();
+  updateTotals();
+}
+
+function computeFinalPrice(base, adjType, adjVal) {
+  if (adjType === 'markup') return base * (1 + adjVal / 100);
+  if (adjType === 'discount') return base * (1 - adjVal / 100);
+  return base;
+}
+
+function onItemChange(idx, field, value) {
+  const item = quoteItems[idx];
+  if (field === 'quantity') item.quantity = parseFloat(value) || 0;
+  else if (field === 'base_price') { item.base_price = parseFloat(value) || 0; }
+  else if (field === 'adjustment_type') { item.adjustment_type = value; }
+  else if (field === 'adjustment_value') { item.adjustment_value = parseFloat(value) || 0; }
+  else item[field] = value;
+  item.final_price = computeFinalPrice(item.base_price, item.adjustment_type, item.adjustment_value);
+  // update final price cell without full re-render
+  const row = document.getElementById(`item-row-${idx}`);
+  if (row) {
+    row.querySelector('.final-price-cell').textContent = fmt(item.final_price);
+    row.querySelector('.amount-cell').textContent = fmt(item.quantity * item.final_price);
+  }
+  updateTotals();
+}
+
+function applyGlobal() {
+  const adjType = document.getElementById('global-adj-type').value;
+  const adjVal = parseFloat(document.getElementById('global-adj-value').value) || 0;
+  if (adjType === 'none') return;
+  quoteItems.forEach(item => {
+    item.adjustment_type = adjType;
+    item.adjustment_value = adjVal;
+    item.final_price = computeFinalPrice(item.base_price, adjType, adjVal);
+  });
+  renderItems();
+  updateTotals();
+}
+
+// ── Render ────────────────────────────────────────────────────────────────────
+function renderItems() {
+  const tbody = document.getElementById('items-tbody');
+  const empty = document.getElementById('items-empty');
+  empty.style.display = quoteItems.length ? 'none' : '';
+  if (!quoteItems.length) { tbody.innerHTML = ''; return; }
+
+  tbody.innerHTML = quoteItems.map((item, idx) => `
+    <tr id="item-row-${idx}">
+      <td class="drag-handle" title="Drag to reorder">⋮⋮</td>
+      <td>
+        <input class="input-inline wide desc-input" value="${esc(item.description)}"
+          placeholder="Description"
+          onchange="onItemChange(${idx},'description',this.value)" />
+        <input class="input-inline narrow" value="${esc(item.code||'')}"
+          placeholder="Code"
+          onchange="onItemChange(${idx},'code',this.value)" style="margin-top:2px;font-size:11px;color:#666" />
+      </td>
+      <td><input class="input-inline narrow center" value="${esc(item.unit||'Nos')}"
+        onchange="onItemChange(${idx},'unit',this.value)" /></td>
+      <td><input class="input-inline narrow center" type="number" min="0" step="any" value="${item.quantity}"
+        oninput="onItemChange(${idx},'quantity',this.value)" /></td>
+      <td><input class="input-inline narrow right" type="number" min="0" step="0.01" value="${item.base_price}"
+        oninput="onItemChange(${idx},'base_price',this.value)" /></td>
+      <td>
+        <div class="adj-cell">
+          <select class="input-sm adj-type" onchange="onItemChange(${idx},'adjustment_type',this.value)">
+            <option value="none" ${item.adjustment_type==='none'?'selected':''}>None</option>
+            <option value="markup" ${item.adjustment_type==='markup'?'selected':''}>+% Markup</option>
+            <option value="discount" ${item.adjustment_type==='discount'?'selected':''}>-% Discount</option>
+          </select>
+          <input class="input-sm narrow right" type="number" min="0" max="100" step="0.5"
+            value="${item.adjustment_value || ''}" placeholder="%"
+            oninput="onItemChange(${idx},'adjustment_value',this.value)"
+            ${item.adjustment_type==='none'?'disabled':''} />
+        </div>
+      </td>
+      <td class="final-price-cell right">${fmt(item.final_price)}</td>
+      <td class="amount-cell right">${fmt(item.quantity * item.final_price)}</td>
+      <td><button class="btn-icon danger" onclick="removeItem(${idx})">✕</button></td>
+    </tr>
+  `).join('');
+
+  // Enable/disable adj value input when type changes
+  tbody.querySelectorAll('.adj-type').forEach((sel, idx) => {
+    sel.addEventListener('change', () => {
+      const inp = sel.nextElementSibling;
+      inp.disabled = sel.value === 'none';
+      if (sel.value === 'none') { inp.value = ''; }
+    });
+  });
+}
+
+function updateTotals() {
+  const gstRate = parseFloat(document.getElementById('gst-rate').value) || 0;
+  const subtotal = quoteItems.reduce((s, i) => s + i.quantity * i.final_price, 0);
+  const gst = subtotal * gstRate / 100;
+  const total = subtotal + gst;
+  document.getElementById('t-subtotal').textContent = '₹ ' + fmt(subtotal);
+  document.getElementById('t-gst-label').textContent = `GST (${gstRate}%)`;
+  document.getElementById('t-gst').textContent = '₹ ' + fmt(gst);
+  document.getElementById('t-total').textContent = '₹ ' + fmt(total);
+}
+
+// ── Save / Export ─────────────────────────────────────────────────────────────
+async function saveQuotation() {
+  const payload = {
+    quote_number: document.getElementById('quote-number').value.trim(),
+    client_name: document.getElementById('client-name').value.trim(),
+    client_address: document.getElementById('client-address').value.trim(),
+    date: document.getElementById('quote-date').value,
+    gst_rate: parseFloat(document.getElementById('gst-rate').value) || 18,
+    notes: document.getElementById('quote-notes').value.trim(),
+    items: quoteItems,
+  };
+  if (!payload.client_name) { alert('Please enter a client name.'); return; }
+  if (!payload.date) { alert('Please select a date.'); return; }
+  if (!quoteItems.length) { alert('Please add at least one item.'); return; }
+
+  let r;
+  if (QID) {
+    r = await fetch(`/api/quotations/${QID}`, {
+      method: 'PUT', headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify(payload)
+    });
+  } else {
+    r = await fetch('/api/quotations', {
+      method: 'POST', headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify(payload)
+    });
+    const data = await r.json();
+    if (data.id) {
+      window.location.href = `/quotation/${data.id}/edit`;
+      return;
+    }
+  }
+  if (r.ok) {
+    document.getElementById('btn-export-pdf').style.display = '';
+    document.getElementById('btn-export-excel').style.display = '';
+    document.getElementById('export-btns').style.display = '';
+    showToast('Saved!');
+  } else {
+    const err = await r.json();
+    alert('Error: ' + (err.error || 'Unknown'));
+  }
+}
+
+function exportQuote(type) {
+  if (!QID) { alert('Save the quotation first.'); return; }
+  window.open(`/api/quotations/${QID}/export/${type}`, '_blank');
+}
+
+// ── Helpers ───────────────────────────────────────────────────────────────────
+function fmt(n) {
+  return (Math.round(n * 100) / 100).toLocaleString('en-IN', {minimumFractionDigits: 2, maximumFractionDigits: 2});
+}
+function esc(s) { return String(s||'').replace(/&/g,'&amp;').replace(/"/g,'&quot;').replace(/</g,'&lt;'); }
+
+function showToast(msg) {
+  let t = document.getElementById('toast');
+  if (!t) { t = document.createElement('div'); t.id = 'toast'; t.className = 'toast'; document.body.appendChild(t); }
+  t.textContent = msg; t.classList.add('show');
+  setTimeout(() => t.classList.remove('show'), 2000);
+}
+
+init();
+</script>
+{% endblock %}

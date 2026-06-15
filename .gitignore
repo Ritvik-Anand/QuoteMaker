@@ -1,0 +1,10 @@
+.env
+.venv/
+__pycache__/
+*.pyc
+*.db
+*.db-shm
+*.db-wal
+quotations/
+uploads/
+test_start.py

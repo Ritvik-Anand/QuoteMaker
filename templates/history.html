@@ -1,0 +1,77 @@
+{% extends "base.html" %}
+{% block title %}History{% endblock %}
+{% block content %}
+<div class="page-header">
+  <h1>Quotation History</h1>
+  <a href="/quotation/new" class="btn btn-primary">+ New Quote</a>
+</div>
+
+<div class="card">
+  <div class="toolbar">
+    <input type="text" id="search-quotes" class="input" placeholder="Search by client or quote number…" oninput="filterQuotes()" />
+  </div>
+  <table class="data-table" id="quotes-table">
+    <thead>
+      <tr>
+        <th>Quote No.</th>
+        <th>Client</th>
+        <th>Date</th>
+        <th>Items</th>
+        <th>Actions</th>
+      </tr>
+    </thead>
+    <tbody id="quotes-tbody">
+      <tr><td colspan="5" class="empty-state">Loading…</td></tr>
+    </tbody>
+  </table>
+</div>
+{% endblock %}
+{% block scripts %}
+<script>
+let allQuotes = [];
+
+async function loadHistory() {
+  allQuotes = await fetch('/api/quotations').then(r => r.json());
+  renderQuotes(allQuotes);
+}
+
+function filterQuotes() {
+  const q = document.getElementById('search-quotes').value.toLowerCase();
+  renderQuotes(allQuotes.filter(x =>
+    x.quote_number.toLowerCase().includes(q) ||
+    x.client_name.toLowerCase().includes(q)
+  ));
+}
+
+function renderQuotes(quotes) {
+  const tbody = document.getElementById('quotes-tbody');
+  if (!quotes.length) {
+    tbody.innerHTML = '<tr><td colspan="5" class="empty-state">No quotations found</td></tr>';
+    return;
+  }
+  tbody.innerHTML = quotes.map(q => `
+    <tr>
+      <td><strong>${q.quote_number}</strong></td>
+      <td>${q.client_name}</td>
+      <td>${q.date}</td>
+      <td><span class="badge">${q.item_count} items</span></td>
+      <td class="actions-cell">
+        <a href="/quotation/${q.id}/edit" class="btn btn-sm">Edit</a>
+        <a href="/api/quotations/${q.id}/export/pdf" class="btn btn-sm" target="_blank">PDF</a>
+        <a href="/api/quotations/${q.id}/export/excel" class="btn btn-sm">Excel</a>
+        <button class="btn btn-sm btn-danger" onclick="deleteQuote(${q.id})">Delete</button>
+      </td>
+    </tr>
+  `).join('');
+}
+
+async function deleteQuote(id) {
+  if (!confirm('Delete this quotation?')) return;
+  await fetch(`/api/quotations/${id}`, {method: 'DELETE'});
+  allQuotes = allQuotes.filter(q => q.id !== id);
+  renderQuotes(allQuotes);
+}
+
+loadHistory();
+</script>
+{% endblock %}

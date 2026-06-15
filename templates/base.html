@@ -1,0 +1,29 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8"/>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+  <title>{% block title %}Bagula Mukhi{% endblock %} — Quotation Maker</title>
+  <link rel="stylesheet" href="/static/style.css"/>
+</head>
+<body>
+  <nav class="navbar">
+    <div class="nav-brand">
+      <span class="nav-logo">⚡</span>
+      <span class="nav-title">Bagula Mukhi</span>
+      <span class="nav-sub">Quotation Maker</span>
+    </div>
+    <div class="nav-links">
+      <a href="/" class="nav-link {% if request.path == '/' %}active{% endif %}">Dashboard</a>
+      <a href="/catalogs" class="nav-link {% if request.path == '/catalogs' %}active{% endif %}">Catalogs</a>
+      <a href="/history" class="nav-link {% if request.path == '/history' %}active{% endif %}">History</a>
+      <a href="/quotation/new" class="btn btn-primary">+ New Quote</a>
+    </div>
+  </nav>
+  <main class="main">
+    {% block content %}{% endblock %}
+  </main>
+  <script src="/static/app.js"></script>
+  {% block scripts %}{% endblock %}
+</body>
+</html>

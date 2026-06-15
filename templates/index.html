@@ -1,0 +1,75 @@
+{% extends "base.html" %}
+{% block title %}Dashboard{% endblock %}
+{% block content %}
+<div class="page-header">
+  <h1>Dashboard</h1>
+</div>
+
+<div class="stats-grid" id="stats">
+  <div class="stat-card">
+    <div class="stat-value" id="stat-suppliers">—</div>
+    <div class="stat-label">Suppliers</div>
+  </div>
+  <div class="stat-card">
+    <div class="stat-value" id="stat-items">—</div>
+    <div class="stat-label">Total Items</div>
+  </div>
+  <div class="stat-card">
+    <div class="stat-value" id="stat-quotes">—</div>
+    <div class="stat-label">Quotations Made</div>
+  </div>
+</div>
+
+<div class="section-row">
+  <div class="card flex-1">
+    <div class="card-header">
+      <h2>Recent Quotations</h2>
+      <a href="/history" class="link-sm">View all →</a>
+    </div>
+    <div id="recent-quotes">
+      <div class="empty-state">Loading...</div>
+    </div>
+  </div>
+  <div class="card" style="width:300px">
+    <div class="card-header"><h2>Quick Actions</h2></div>
+    <div class="quick-actions">
+      <a href="/quotation/new" class="btn btn-primary btn-block">+ New Quotation</a>
+      <a href="/catalogs" class="btn btn-outline btn-block">Manage Catalogs</a>
+    </div>
+  </div>
+</div>
+{% endblock %}
+{% block scripts %}
+<script>
+async function loadDashboard() {
+  const [suppliers, quotes] = await Promise.all([
+    fetch('/api/suppliers').then(r => r.json()),
+    fetch('/api/quotations').then(r => r.json()),
+  ]);
+  const itemCount = suppliers.reduce((s, x) => s + (x.item_count || 0), 0);
+  document.getElementById('stat-suppliers').textContent = suppliers.length;
+  document.getElementById('stat-items').textContent = itemCount.toLocaleString();
+  document.getElementById('stat-quotes').textContent = quotes.length;
+
+  const el = document.getElementById('recent-quotes');
+  if (!quotes.length) {
+    el.innerHTML = '<div class="empty-state">No quotations yet. <a href="/quotation/new">Create one →</a></div>';
+    return;
+  }
+  el.innerHTML = quotes.slice(0, 8).map(q => `
+    <div class="quote-row">
+      <div>
+        <div class="quote-num">${q.quote_number}</div>
+        <div class="quote-client">${q.client_name}</div>
+      </div>
+      <div class="quote-meta">
+        <span class="badge">${q.item_count} items</span>
+        <span class="quote-date">${q.date}</span>
+        <a href="/quotation/${q.id}/edit" class="btn btn-sm">Open</a>
+      </div>
+    </div>
+  `).join('');
+}
+loadDashboard();
+</script>
+{% endblock %}
