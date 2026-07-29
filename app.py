@@ -1,6 +1,7 @@
 import os
 import json
 import secrets
+import requests
 from datetime import date
 from pathlib import Path
 from flask import (
@@ -27,6 +28,11 @@ app.secret_key = os.environ.get("SECRET_KEY", secrets.token_hex(32))
 app.config["MAX_CONTENT_LENGTH"] = 50 * 1024 * 1024  # 50 MB
 app.config["SESSION_COOKIE_HTTPONLY"] = True
 app.config["SESSION_COOKIE_SAMESITE"] = "Lax"
+
+# Vercel serverless functions hard-cap request bodies at ~4.5MB, so catalog
+# PDFs above that go browser -> Vercel Blob -> here (bypassing that limit)
+# instead of the normal multipart upload. See upload_catalog_blob() below.
+BLOB_API_BASE = "https://blob.vercel-storage.com"
 
 
 def _next_quote_number():
@@ -245,32 +251,15 @@ def get_catalogs(sid):
     return jsonify(rows)
 
 
-@app.route("/api/suppliers/<int:sid>/upload", methods=["POST"])
-@login_required
-def upload_catalog(sid):
-    conn = get_db()
-    supplier = conn.execute("SELECT * FROM suppliers WHERE id = ?", (sid,)).fetchone()
-    conn.close()
-    if not supplier:
-        return jsonify({"error": "Supplier not found"}), 404
-
-    if "file" not in request.files:
-        return jsonify({"error": "No file provided"}), 400
-    f = request.files["file"]
-    if not f.filename.lower().endswith(".pdf"):
-        return jsonify({"error": "Only PDF files are supported"}), 400
-
-    catalog_name = request.form.get("catalog_name", "").strip() or f.filename
-    catalog_id = request.form.get("catalog_id", "").strip()
-
-    pdf_bytes = f.read()
+def _ingest_catalog(sid, supplier_name, pdf_bytes, catalog_name, catalog_id):
+    """Parse a catalog PDF and upsert its items. Returns a (body, status) jsonify-able tuple."""
     try:
-        items = parse_catalog_pdf(pdf_bytes, supplier["name"])
+        items = parse_catalog_pdf(pdf_bytes, supplier_name)
     except Exception as e:
-        return jsonify({"error": f"Failed to parse PDF: {str(e)}"}), 500
+        return {"error": f"Failed to parse PDF: {str(e)}"}, 500
 
     if not items:
-        return jsonify({"error": "No items extracted from PDF"}), 400
+        return {"error": "No items extracted from PDF"}, 400
 
     conn = get_db()
     if catalog_id:
@@ -291,7 +280,82 @@ def upload_catalog(sid):
     )
     conn.commit()
     conn.close()
-    return jsonify({"imported": len(items), "catalog_id": catalog_id, "catalog_name": catalog_name})
+    return {"imported": len(items), "catalog_id": catalog_id, "catalog_name": catalog_name}, 200
+
+
+@app.route("/api/suppliers/<int:sid>/upload", methods=["POST"])
+@login_required
+def upload_catalog(sid):
+    conn = get_db()
+    supplier = conn.execute("SELECT * FROM suppliers WHERE id = ?", (sid,)).fetchone()
+    conn.close()
+    if not supplier:
+        return jsonify({"error": "Supplier not found"}), 404
+
+    if "file" not in request.files:
+        return jsonify({"error": "No file provided"}), 400
+    f = request.files["file"]
+    if not f.filename.lower().endswith(".pdf"):
+        return jsonify({"error": "Only PDF files are supported"}), 400
+
+    catalog_name = request.form.get("catalog_name", "").strip() or f.filename
+    catalog_id = request.form.get("catalog_id", "").strip()
+
+    body, status = _ingest_catalog(sid, supplier["name"], f.read(), catalog_name, catalog_id)
+    return jsonify(body), status
+
+
+@app.route("/api/blob/upload-token", methods=["GET"])
+@login_required
+def blob_upload_token():
+    token = os.environ.get("BLOB_READ_WRITE_TOKEN")
+    if not token:
+        return jsonify({"error": "Blob storage is not configured"}), 500
+    return jsonify({"token": token, "api_base": BLOB_API_BASE})
+
+
+@app.route("/api/suppliers/<int:sid>/upload-blob", methods=["POST"])
+@login_required
+def upload_catalog_blob(sid):
+    """Companion to upload_catalog() for large PDFs: the browser has already
+    PUT the file directly to Vercel Blob (bypassing the ~4.5MB serverless
+    request-body limit); we fetch it from there, parse it, and clean up."""
+    conn = get_db()
+    supplier = conn.execute("SELECT * FROM suppliers WHERE id = ?", (sid,)).fetchone()
+    conn.close()
+    if not supplier:
+        return jsonify({"error": "Supplier not found"}), 404
+
+    data = request.get_json(force=True) or {}
+    blob_url = data.get("blob_url", "").strip()
+    if not blob_url:
+        return jsonify({"error": "No file provided"}), 400
+
+    catalog_name = data.get("catalog_name", "").strip() or "Catalog"
+    catalog_id = data.get("catalog_id", "").strip()
+
+    try:
+        r = requests.get(blob_url, timeout=60)
+        r.raise_for_status()
+        pdf_bytes = r.content
+    except Exception as e:
+        return jsonify({"error": f"Failed to retrieve uploaded file: {str(e)}"}), 500
+
+    body, status = _ingest_catalog(sid, supplier["name"], pdf_bytes, catalog_name, catalog_id)
+
+    token = os.environ.get("BLOB_READ_WRITE_TOKEN")
+    if token:
+        try:
+            requests.post(
+                f"{BLOB_API_BASE}/delete",
+                headers={"authorization": f"Bearer {token}", "content-type": "application/json", "x-api-version": "7"},
+                json={"urls": [blob_url]},
+                timeout=15,
+            )
+        except Exception:
+            pass  # best-effort cleanup; leftover blobs don't affect app data
+
+    return jsonify(body), status
 
 
 @app.route("/api/catalogs/<int:cid>", methods=["DELETE"])

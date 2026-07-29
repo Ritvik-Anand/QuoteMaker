@@ -188,6 +188,11 @@ function showReuploadModal(sid, sname, cid, cname, fileInput) {
   showModal('modal-upload');
 }
 
+// Vercel serverless functions hard-cap request bodies around 4.5MB. Files
+// under this go straight to our upload endpoint; larger ones go browser ->
+// Vercel Blob -> our upload-blob endpoint instead, which has no such limit.
+const DIRECT_UPLOAD_LIMIT = 4 * 1024 * 1024;
+
 async function doUpload() {
   const file = document.getElementById('upload-file-input').files[0];
   const catalogName = document.getElementById('upload-catalog-name').value.trim();
@@ -196,17 +201,34 @@ async function doUpload() {
 
   const progress = document.getElementById('upload-progress');
   const btn = document.getElementById('upload-confirm-btn');
-  progress.innerHTML = '<span class="uploading">⏳ Reading catalog with AI… this may take 30–60 seconds</span>';
   btn.disabled = true;
 
-  const fd = new FormData();
-  fd.append('file', file);
-  fd.append('catalog_name', catalogName);
-  if (uploadCatalogId) fd.append('catalog_id', uploadCatalogId);
-
   try {
-    const r = await fetch(`/api/suppliers/${uploadSupplierId}/upload`, {method: 'POST', body: fd});
-    const data = await r.json();
+    let data;
+    if (file.size > DIRECT_UPLOAD_LIMIT) {
+      progress.innerHTML = '<span class="uploading">⏳ Uploading large file…</span>';
+      const blobUrl = await uploadFileToBlob(file);
+      progress.innerHTML = '<span class="uploading">⏳ Reading catalog with AI… this may take 30–60 seconds</span>';
+      const r = await fetch(`/api/suppliers/${uploadSupplierId}/upload-blob`, {
+        method: 'POST',
+        headers: {'content-type': 'application/json'},
+        body: JSON.stringify({
+          blob_url: blobUrl,
+          catalog_name: catalogName,
+          catalog_id: uploadCatalogId || ''
+        })
+      });
+      data = await r.json();
+    } else {
+      progress.innerHTML = '<span class="uploading">⏳ Reading catalog with AI… this may take 30–60 seconds</span>';
+      const fd = new FormData();
+      fd.append('file', file);
+      fd.append('catalog_name', catalogName);
+      if (uploadCatalogId) fd.append('catalog_id', uploadCatalogId);
+      const r = await fetch(`/api/suppliers/${uploadSupplierId}/upload`, {method: 'POST', body: fd});
+      data = await r.json();
+    }
+
     if (data.error) {
       progress.innerHTML = `<span class="error-text">❌ ${data.error}</span>`;
       btn.disabled = false;
@@ -218,6 +240,23 @@ async function doUpload() {
     progress.innerHTML = '<span class="error-text">❌ Upload failed</span>';
     btn.disabled = false;
   }
+}
+
+async function uploadFileToBlob(file) {
+  const tokenRes = await fetch('/api/blob/upload-token').then(r => r.json());
+  if (tokenRes.error) throw new Error(tokenRes.error);
+  const pathname = `catalogs/${Date.now()}-${encodeURIComponent(file.name)}`;
+  const r = await fetch(`${tokenRes.api_base}/${pathname}`, {
+    method: 'PUT',
+    headers: {
+      'authorization': `Bearer ${tokenRes.token}`,
+      'x-content-type': file.type || 'application/pdf'
+    },
+    body: file
+  });
+  const data = await r.json();
+  if (!r.ok || !data.url) throw new Error(data.error?.message || 'Blob upload failed');
+  return data.url;
 }
 
 async function viewItems(sid, name) {
