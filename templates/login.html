@@ -31,7 +31,7 @@
         radial-gradient(circle at 15% 85%, rgba(129,140,248,.18), transparent 50%);
     }
     .auth-brand-content { position: relative; z-index: 1; max-width: 380px; }
-    .auth-logo { width: 46px; height: 46px; border-radius: 13px; background: rgba(255,255,255,.1); border: 1px solid rgba(255,255,255,.14); display: flex; align-items: center; justify-content: center; font-size: 22px; margin-bottom: 28px; }
+    .auth-logo { width: 46px; height: 46px; border-radius: 13px; display: block; margin-bottom: 28px; box-shadow: 0 0 0 1px rgba(255,255,255,.14); }
     .auth-brand-content h2 { font-family: 'Inter Tight', sans-serif; font-size: 32px; font-weight: 800; letter-spacing: -.03em; line-height: 1.15; margin-bottom: 14px; }
     .auth-brand-content p { color: rgba(255,255,255,.6); font-size: 14.5px; line-height: 1.6; }
     .auth-feature-list { margin-top: 36px; display: flex; flex-direction: column; gap: 14px; }
@@ -40,7 +40,7 @@
 
     .login-box { width: 100%; max-width: 360px; }
     .login-logo { margin-bottom: 30px; }
-    .login-logo .icon { font-size: 30px; display: inline-block; margin-bottom: 12px; }
+    .login-logo .icon { width: 44px; height: 44px; border-radius: 12px; display: block; margin-bottom: 12px; }
     .login-logo h1 { font-family: 'Inter Tight', sans-serif; font-size: 25px; font-weight: 800; color: var(--brand); letter-spacing: -.02em; }
     .login-logo p { font-size: 13px; color: var(--text-muted); margin-top: 4px; }
     .login-form { display: flex; flex-direction: column; gap: 16px; }
@@ -55,7 +55,7 @@
         flex: none; min-height: auto; padding: 30px 24px 26px;
       }
       .auth-brand-content { max-width: none; }
-      .auth-logo { width: 38px; height: 38px; font-size: 17px; border-radius: 10px; margin-bottom: 14px; }
+      .auth-logo { width: 38px; height: 38px; border-radius: 10px; margin-bottom: 14px; }
       .auth-brand-content h2 { font-size: 21px; margin-bottom: 5px; }
       .auth-brand-content p { font-size: 13px; }
       .auth-feature-list { display: none; }
@@ -70,7 +70,7 @@
   <div class="auth-shell">
     <div class="auth-panel auth-brand-panel">
       <div class="auth-brand-content">
-        <div class="auth-logo">⚡</div>
+        <img class="auth-logo" src="/static/icons/icon-192.png" alt="Slate"/>
         <h2>Quotations, done right.</h2>
         <p>Slate turns supplier price lists into searchable catalogs and lets your team build accurate, on-brand quotations in minutes.</p>
         <div class="auth-feature-list">
@@ -83,7 +83,7 @@
     <div class="auth-panel">
       <div class="login-box">
         <div class="login-logo">
-          <span class="icon">⚡</span>
+          <img class="icon" src="/static/icons/icon-192.png" alt="Slate"/>
           <h1>Slate</h1>
           <p>Quotation Maker — Sign in to continue</p>
         </div>
