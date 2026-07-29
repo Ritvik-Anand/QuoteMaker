@@ -49,7 +49,7 @@ def change_password(user_id: int, new_password: str):
     conn = get_db()
     conn.execute(
         "UPDATE users SET password_hash = ? WHERE id = ?",
-        (generate_password_hash(new_password), user_id)
+        (generate_password_hash(new_password, method="pbkdf2:sha256"), user_id)
     )
     conn.commit()
     conn.close()

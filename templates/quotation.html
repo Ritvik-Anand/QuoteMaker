@@ -2,7 +2,10 @@
 {% block title %}Quotation{% endblock %}
 {% block content %}
 <div class="page-header">
-  <h1 id="page-title">New Quotation</h1>
+  <div>
+    <h1 id="page-title">New Quotation</h1>
+    <div class="attribution" id="quote-attribution" style="display:none;margin-top:5px"></div>
+  </div>
   <div class="header-actions">
     <button class="btn btn-outline" onclick="saveQuotation()">💾 Save</button>
     <button class="btn btn-outline" id="btn-export-pdf" style="display:none" onclick="exportQuote('pdf')">⬇ PDF</button>
@@ -42,6 +45,12 @@
           <label>Notes <span class="opt">(optional)</span></label>
           <textarea id="quote-notes" class="input" rows="2" placeholder="Terms, validity, payment terms…"></textarea>
         </div>
+        <div class="form-group full-width">
+          <label>Internal Tags <span class="opt">(🔒 visible to you only — never appears in PDF or Excel)</span></label>
+          <div class="tag-input-wrap" id="tag-input-wrap">
+            <input type="text" id="quote-tags-input" class="tag-input" placeholder="Type a tag and press Enter…" />
+          </div>
+        </div>
       </div>
     </div>
 
@@ -67,8 +76,8 @@
           <option value="">All suppliers</option>
         </select>
         <button class="btn btn-sm" onclick="addManualItem()">+ Manual</button>
+        <div id="search-results" class="search-results hidden"></div>
       </div>
-      <div id="search-results" class="search-results hidden"></div>
 
       <div class="items-table-wrap">
         <table class="data-table items-table">
@@ -116,6 +125,7 @@
 <script>
 const QID = {{ qid|default('null') }};
 let quoteItems = [];
+let quoteTags = [];
 let searchTimeout = null;
 
 // ── Init ──────────────────────────────────────────────────────────────────────
@@ -143,6 +153,17 @@ async function init() {
     document.getElementById('client-address').value = q.client_address || '';
     document.getElementById('gst-rate').value = q.gst_rate;
     document.getElementById('quote-notes').value = q.notes || '';
+    quoteTags = (q.tags || '').split(',').map(t => t.trim()).filter(Boolean);
+    renderTags();
+    if (q.created_by || q.updated_by) {
+      const attr = document.getElementById('quote-attribution');
+      let html = q.created_by ? `Created by <strong>${esc(q.created_by)}</strong>` : '';
+      if (q.updated_by && q.updated_by !== q.created_by) {
+        html += (html ? ' · ' : '') + `last edited by <strong>${esc(q.updated_by)}</strong>`;
+      }
+      attr.innerHTML = html;
+      attr.style.display = '';
+    }
     quoteItems = data.items.map(i => ({...i}));
     renderItems();
     updateTotals();
@@ -150,6 +171,46 @@ async function init() {
     const nb = await fetch('/api/quotations/next-number').then(r => r.json());
     document.getElementById('quote-number').value = nb.quote_number;
   }
+
+  const tagInput = document.getElementById('quote-tags-input');
+  tagInput.addEventListener('keydown', e => {
+    if (e.key === 'Enter') {
+      e.preventDefault();
+      addTagFromInput();
+    } else if (e.key === 'Backspace' && !tagInput.value && quoteTags.length) {
+      quoteTags.pop();
+      renderTags();
+    }
+  });
+  tagInput.addEventListener('blur', addTagFromInput);
+}
+
+// ── Tags ──────────────────────────────────────────────────────────────────────
+function renderTags() {
+  const wrap = document.getElementById('tag-input-wrap');
+  wrap.querySelectorAll('.tag-chip').forEach(el => el.remove());
+  const input = document.getElementById('quote-tags-input');
+  quoteTags.forEach((tag, idx) => {
+    const chip = document.createElement('span');
+    chip.className = 'tag-chip';
+    chip.innerHTML = `${esc(tag)} <span class="tag-chip-remove" onclick="removeTag(${idx})">✕</span>`;
+    wrap.insertBefore(chip, input);
+  });
+}
+
+function addTagFromInput() {
+  const input = document.getElementById('quote-tags-input');
+  const val = input.value.trim();
+  if (val && !quoteTags.includes(val)) {
+    quoteTags.push(val);
+    renderTags();
+  }
+  input.value = '';
+}
+
+function removeTag(idx) {
+  quoteTags.splice(idx, 1);
+  renderTags();
 }
 
 // ── Search ────────────────────────────────────────────────────────────────────
@@ -165,6 +226,18 @@ function searchItems() {
   }, 250);
 }
 
+// Pulls the size (sq.mm) and pack length (e.g. "200m Pack") out of a
+// description so they stand out as badges instead of being buried in text —
+// this is what tells two otherwise-similar rows apart at a glance.
+function extractSizePack(desc) {
+  const sizeMatch = desc.match(/^([\d.]+)\s*sq\.?\s*mm/i);
+  const packMatch = desc.match(/(\d+)\s*m\s*(pack|coil)\b/i);
+  return {
+    size: sizeMatch ? `${sizeMatch[1]} sq.mm` : null,
+    pack: packMatch ? `${packMatch[1]}m ${packMatch[2][0].toUpperCase()}${packMatch[2].slice(1).toLowerCase()}` : null,
+  };
+}
+
 function showResults(items) {
   const el = document.getElementById('search-results');
   if (!items.length) {
@@ -172,16 +245,21 @@ function showResults(items) {
     el.classList.remove('hidden');
     return;
   }
-  el.innerHTML = items.map(i => `
+  el.innerHTML = items.map(i => {
+    const { size, pack } = extractSizePack(i.description);
+    return `
     <div class="sr-item" onclick="addItem(${JSON.stringify(i).replace(/"/g,'&quot;')})">
       <div class="sr-desc">${i.description}</div>
       <div class="sr-meta">
         <span class="sr-supplier">${i.supplier_name}</span>
         ${i.code ? `<span class="sr-code">${i.code}</span>` : ''}
+        ${size ? `<span class="sr-size-badge">${size}</span>` : ''}
+        ${pack ? `<span class="sr-pack-badge">${pack}</span>` : ''}
         <span class="sr-price">₹ ${i.base_price.toLocaleString('en-IN', {minimumFractionDigits:2})}</span>
       </div>
     </div>
-  `).join('');
+  `;
+  }).join('');
   el.classList.remove('hidden');
 }
 
@@ -205,6 +283,7 @@ function addItem(item) {
     adjustment_type: 'none',
     adjustment_value: 0,
     final_price: item.base_price,
+    supplier_name: item.supplier_name || '',
   });
   renderItems();
   updateTotals();
@@ -254,9 +333,26 @@ function onItemChange(idx, field, value) {
   // update final price cell without full re-render
   const row = document.getElementById(`item-row-${idx}`);
   if (row) {
-    row.querySelector('.final-price-cell').textContent = fmt(item.final_price);
+    row.querySelector('.final-price-cell').value = item.final_price;
     row.querySelector('.amount-cell').textContent = fmt(item.quantity * item.final_price);
   }
+  updateTotals();
+}
+
+function onFinalPriceChange(idx, value) {
+  const item = quoteItems[idx];
+  const newFinal = parseFloat(value) || 0;
+  item.final_price = newFinal;
+
+  if (item.base_price > 0 && newFinal !== item.base_price) {
+    const diffPct = ((newFinal - item.base_price) / item.base_price) * 100;
+    item.adjustment_type = diffPct > 0 ? 'markup' : 'discount';
+    item.adjustment_value = Math.round(Math.abs(diffPct) * 100) / 100;
+  } else {
+    item.adjustment_type = 'none';
+    item.adjustment_value = 0;
+  }
+  renderItems();
   updateTotals();
 }
 
@@ -290,6 +386,7 @@ function renderItems() {
         <input class="input-inline narrow" value="${esc(item.code||'')}"
           placeholder="Code"
           onchange="onItemChange(${idx},'code',this.value)" style="margin-top:2px;font-size:11px;color:#666" />
+        ${item.supplier_name ? `<div class="item-make-tag">${esc(item.supplier_name)}</div>` : ''}
       </td>
       <td><input class="input-inline narrow center" value="${esc(item.unit||'Nos')}"
         onchange="onItemChange(${idx},'unit',this.value)" /></td>
@@ -310,7 +407,8 @@ function renderItems() {
             ${item.adjustment_type==='none'?'disabled':''} />
         </div>
       </td>
-      <td class="final-price-cell right">${fmt(item.final_price)}</td>
+      <td><input class="input-inline narrow right final-price-cell" type="number" min="0" step="0.01" value="${item.final_price}"
+        onchange="onFinalPriceChange(${idx},this.value)" /></td>
       <td class="amount-cell right">${fmt(item.quantity * item.final_price)}</td>
       <td><button class="btn-icon danger" onclick="removeItem(${idx})">✕</button></td>
     </tr>
@@ -339,6 +437,7 @@ function updateTotals() {
 
 // ── Save / Export ─────────────────────────────────────────────────────────────
 async function saveQuotation() {
+  addTagFromInput();
   const payload = {
     quote_number: document.getElementById('quote-number').value.trim(),
     client_name: document.getElementById('client-name').value.trim(),
@@ -346,8 +445,10 @@ async function saveQuotation() {
     date: document.getElementById('quote-date').value,
     gst_rate: parseFloat(document.getElementById('gst-rate').value) || 18,
     notes: document.getElementById('quote-notes').value.trim(),
+    tags: quoteTags.join(', '),
     items: quoteItems,
   };
+  if (!payload.quote_number) { alert('Please enter a quote number.'); return; }
   if (!payload.client_name) { alert('Please enter a client name.'); return; }
   if (!payload.date) { alert('Please select a date.'); return; }
   if (!quoteItems.length) { alert('Please add at least one item.'); return; }

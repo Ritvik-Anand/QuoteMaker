@@ -108,7 +108,9 @@ def admin_users_page():
 def api_list_users():
     conn = get_db()
     rows = conn.execute(
-        "SELECT id, username, is_admin, created_at FROM users ORDER BY id"
+        "SELECT u.id, u.username, u.is_admin, u.created_at, "
+        "(SELECT COUNT(*) FROM quotations q WHERE q.created_by = u.username) as quote_count "
+        "FROM users u ORDER BY u.id"
     ).fetchall()
     conn.close()
     return jsonify(rows)
@@ -380,7 +382,8 @@ def get_supplier_items(sid):
 def list_quotations():
     conn = get_db()
     rows = conn.execute(
-        "SELECT q.*, COUNT(qi.id) as item_count "
+        "SELECT q.*, COUNT(qi.id) as item_count, "
+        "COALESCE(SUM(qi.quantity * qi.final_price), 0) as subtotal "
         "FROM quotations q LEFT JOIN quotation_items qi ON qi.quotation_id = q.id "
         "GROUP BY q.id ORDER BY q.id DESC"
     ).fetchall()
@@ -401,22 +404,23 @@ def create_quotation():
     conn = get_db()
     try:
         qid = conn.insert(
-            "INSERT INTO quotations (quote_number, client_name, client_address, date, gst_rate, notes) "
-            "VALUES (?,?,?,?,?,?)",
+            "INSERT INTO quotations (quote_number, client_name, client_address, date, gst_rate, notes, tags, "
+            "created_by, updated_by) VALUES (?,?,?,?,?,?,?,?,?)",
             (data["quote_number"], data["client_name"], data.get("client_address", ""),
-             data["date"], float(data.get("gst_rate", 18)), data.get("notes", ""))
+             data["date"], float(data.get("gst_rate", 18)), data.get("notes", ""), data.get("tags", ""),
+             session["username"], session["username"])
         )
         conn.commit()
         for idx, item in enumerate(data.get("items", [])):
             conn.execute(
                 "INSERT INTO quotation_items "
                 "(quotation_id, item_id, description, code, unit, quantity, base_price, "
-                "adjustment_type, adjustment_value, final_price, sort_order) "
-                "VALUES (?,?,?,?,?,?,?,?,?,?,?)",
+                "adjustment_type, adjustment_value, final_price, sort_order, supplier_name) "
+                "VALUES (?,?,?,?,?,?,?,?,?,?,?,?)",
                 (qid, item.get("item_id"), item["description"], item.get("code", ""),
                  item.get("unit", "Nos"), float(item["quantity"]), float(item["base_price"]),
                  item.get("adjustment_type", "none"), float(item.get("adjustment_value", 0)),
-                 float(item["final_price"]), idx)
+                 float(item["final_price"]), idx, item.get("supplier_name", ""))
             )
         conn.commit()
     except Exception as e:
@@ -446,24 +450,30 @@ def get_quotation(qid):
 def update_quotation(qid):
     data = request.json
     conn = get_db()
-    conn.execute(
-        "UPDATE quotations SET client_name=?, client_address=?, date=?, gst_rate=?, notes=? WHERE id=?",
-        (data["client_name"], data.get("client_address", ""), data["date"],
-         float(data.get("gst_rate", 18)), data.get("notes", ""), qid)
-    )
-    conn.execute("DELETE FROM quotation_items WHERE quotation_id = ?", (qid,))
-    for idx, item in enumerate(data.get("items", [])):
+    try:
         conn.execute(
-            "INSERT INTO quotation_items "
-            "(quotation_id, item_id, description, code, unit, quantity, base_price, "
-            "adjustment_type, adjustment_value, final_price, sort_order) "
-            "VALUES (?,?,?,?,?,?,?,?,?,?,?)",
-            (qid, item.get("item_id"), item["description"], item.get("code", ""),
-             item.get("unit", "Nos"), float(item["quantity"]), float(item["base_price"]),
-             item.get("adjustment_type", "none"), float(item.get("adjustment_value", 0)),
-             float(item["final_price"]), idx)
+            "UPDATE quotations SET quote_number=?, client_name=?, client_address=?, date=?, "
+            "gst_rate=?, notes=?, tags=?, updated_by=?, updated_at=CURRENT_TIMESTAMP WHERE id=?",
+            (data["quote_number"], data["client_name"], data.get("client_address", ""), data["date"],
+             float(data.get("gst_rate", 18)), data.get("notes", ""), data.get("tags", ""),
+             session["username"], qid)
         )
-    conn.commit()
+        conn.execute("DELETE FROM quotation_items WHERE quotation_id = ?", (qid,))
+        for idx, item in enumerate(data.get("items", [])):
+            conn.execute(
+                "INSERT INTO quotation_items "
+                "(quotation_id, item_id, description, code, unit, quantity, base_price, "
+                "adjustment_type, adjustment_value, final_price, sort_order, supplier_name) "
+                "VALUES (?,?,?,?,?,?,?,?,?,?,?,?)",
+                (qid, item.get("item_id"), item["description"], item.get("code", ""),
+                 item.get("unit", "Nos"), float(item["quantity"]), float(item["base_price"]),
+                 item.get("adjustment_type", "none"), float(item.get("adjustment_value", 0)),
+                 float(item["final_price"]), idx, item.get("supplier_name", ""))
+            )
+        conn.commit()
+    except Exception as e:
+        conn.close()
+        return jsonify({"error": str(e)}), 400
     conn.close()
     return jsonify({"ok": True})
 

@@ -6,13 +6,28 @@
   <button class="btn btn-primary" onclick="showAddUser()">+ Add User</button>
 </div>
 
+<div class="stats-grid" id="admin-stats">
+  <div class="stat-card">
+    <div class="stat-value" id="stat-total">—</div>
+    <div class="stat-label">Team Members</div>
+  </div>
+  <div class="stat-card">
+    <div class="stat-value" id="stat-admins">—</div>
+    <div class="stat-label">Admins</div>
+  </div>
+  <div class="stat-card">
+    <div class="stat-value" id="stat-quotes">—</div>
+    <div class="stat-label">Quotes Created (all users)</div>
+  </div>
+</div>
+
 <div class="card">
   <table class="data-table">
     <thead>
-      <tr><th>Username</th><th>Role</th><th>Created</th><th>Actions</th></tr>
+      <tr><th>User</th><th>Role</th><th>Quotes Made</th><th>Joined</th><th>Actions</th></tr>
     </thead>
     <tbody id="users-tbody">
-      <tr><td colspan="4" class="empty-state">Loading…</td></tr>
+      <tr><td colspan="5" class="empty-state">Loading…</td></tr>
     </tbody>
   </table>
 </div>
@@ -70,18 +85,36 @@
 {% block scripts %}
 <script>
 let resetUserId = null;
+const AVATAR_COLORS = ['#4f46e5','#0891b2','#059669','#d97706','#db2777','#7c3aed','#dc2626'];
+function avatarColor(name) {
+  let hash = 0;
+  for (const ch of String(name || '?')) hash = (hash * 31 + ch.charCodeAt(0)) >>> 0;
+  return AVATAR_COLORS[hash % AVATAR_COLORS.length];
+}
 
 async function loadUsers() {
   const users = await fetch('/api/admin/users').then(r => r.json());
+  document.getElementById('stat-total').textContent = users.length;
+  document.getElementById('stat-admins').textContent = users.filter(u => u.is_admin).length;
+  document.getElementById('stat-quotes').textContent = users.reduce((s, u) => s + (u.quote_count || 0), 0);
+
   const tbody = document.getElementById('users-tbody');
   if (!users.length) {
-    tbody.innerHTML = '<tr><td colspan="4" class="empty-state">No users yet</td></tr>';
+    tbody.innerHTML = '<tr><td colspan="5" class="empty-state">No users yet</td></tr>';
     return;
   }
   tbody.innerHTML = users.map(u => `
     <tr>
-      <td><strong>${esc(u.username)}</strong></td>
+      <td>
+        <div style="display:flex;align-items:center;gap:10px">
+          <span class="user-avatar-lg" style="background:${avatarColor(u.username)}">${esc(u.username[0]).toUpperCase()}</span>
+          <strong>${esc(u.username)}</strong>
+        </div>
+      </td>
       <td><span class="badge ${u.is_admin ? 'badge-admin' : ''}">${u.is_admin ? 'Admin' : 'Staff'}</span></td>
+      <td>
+        ${u.quote_count ? `<a href="/history?user=${encodeURIComponent(u.username)}" class="link-sm">${u.quote_count} quote${u.quote_count === 1 ? '' : 's'} →</a>` : '<span style="color:var(--text-faint)">None yet</span>'}
+      </td>
       <td style="color:var(--text-muted);font-size:12px">${u.created_at.substring(0,10)}</td>
       <td class="actions-cell">
         <button class="btn btn-sm" onclick="showResetPw(${u.id}, '${esc(u.username)}')">Reset Password</button>

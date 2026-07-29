@@ -122,6 +122,10 @@ CREATE TABLE IF NOT EXISTS quotations (
     date           TEXT NOT NULL,
     gst_rate       REAL DEFAULT 18.0,
     notes          TEXT,
+    tags           TEXT DEFAULT '',
+    created_by     TEXT DEFAULT '',
+    updated_by     TEXT DEFAULT '',
+    updated_at     TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     created_at     TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
 CREATE TABLE IF NOT EXISTS quotation_items (
@@ -136,7 +140,8 @@ CREATE TABLE IF NOT EXISTS quotation_items (
     adjustment_type  TEXT DEFAULT 'none',
     adjustment_value REAL DEFAULT 0,
     final_price      REAL NOT NULL,
-    sort_order       INTEGER DEFAULT 0
+    sort_order       INTEGER DEFAULT 0,
+    supplier_name    TEXT DEFAULT ''
 );
 """
 
@@ -178,6 +183,10 @@ _PG_TABLES = [
         date           TEXT NOT NULL,
         gst_rate       REAL DEFAULT 18.0,
         notes          TEXT,
+        tags           TEXT DEFAULT '',
+        created_by     TEXT DEFAULT '',
+        updated_by     TEXT DEFAULT '',
+        updated_at     TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
         created_at     TIMESTAMP DEFAULT CURRENT_TIMESTAMP
     )""",
     """CREATE TABLE IF NOT EXISTS quotation_items (
@@ -192,9 +201,42 @@ _PG_TABLES = [
         adjustment_type  TEXT DEFAULT 'none',
         adjustment_value REAL DEFAULT 0,
         final_price      REAL NOT NULL,
-        sort_order       INTEGER DEFAULT 0
+        sort_order       INTEGER DEFAULT 0,
+        supplier_name    TEXT DEFAULT ''
     )""",
 ]
+
+
+# (table, column, DDL fragment) — new columns added to existing installs land here.
+_COLUMN_MIGRATIONS = [
+    ("items", "catalog_id", "INTEGER REFERENCES catalogs(id) ON DELETE CASCADE"),
+    ("quotations", "tags", "TEXT DEFAULT ''"),
+    ("quotation_items", "supplier_name", "TEXT DEFAULT ''"),
+    ("quotations", "created_by", "TEXT DEFAULT ''"),
+    ("quotations", "updated_by", "TEXT DEFAULT ''"),
+    # SQLite forbids non-constant defaults (CURRENT_TIMESTAMP) in ALTER TABLE ADD COLUMN,
+    # so this one is added bare and backfilled below.
+    ("quotations", "updated_at", "TIMESTAMP"),
+]
+
+
+def _run_column_migrations(conn):
+    if conn._pg:
+        for table, col, ddl in _COLUMN_MIGRATIONS:
+            exists = conn.execute(
+                "SELECT column_name FROM information_schema.columns "
+                "WHERE table_name=%s AND column_name=%s", (table, col)
+            ).fetchone()
+            if not exists:
+                conn.execute(f"ALTER TABLE {table} ADD COLUMN {col} {ddl}")
+    else:
+        for table, col, ddl in _COLUMN_MIGRATIONS:
+            cols = {r[1] for r in conn._conn.execute(f"PRAGMA table_info({table})")}
+            if col not in cols:
+                conn._conn.execute(f"ALTER TABLE {table} ADD COLUMN {col} {ddl}")
+    conn.execute(
+        "UPDATE quotations SET updated_at = created_at WHERE updated_at IS NULL"
+    )
 
 
 def init_db():
@@ -202,26 +244,12 @@ def init_db():
     if conn._pg:
         for stmt in _PG_TABLES:
             conn.execute(stmt)
-        # Migration: add catalog_id if missing
-        exists = conn.execute(
-            "SELECT column_name FROM information_schema.columns "
-            "WHERE table_name='items' AND column_name='catalog_id'"
-        ).fetchone()
-        if not exists:
-            conn.execute(
-                "ALTER TABLE items ADD COLUMN catalog_id INTEGER REFERENCES catalogs(id) ON DELETE CASCADE"
-            )
     else:
         for stmt in _SQLITE_SCHEMA.strip().split(";"):
             stmt = stmt.strip()
             if stmt:
                 conn._conn.execute(stmt)
-        # Migration: add catalog_id if missing
-        cols = {r[1] for r in conn._conn.execute("PRAGMA table_info(items)")}
-        if "catalog_id" not in cols:
-            conn._conn.execute(
-                "ALTER TABLE items ADD COLUMN catalog_id INTEGER REFERENCES catalogs(id) ON DELETE CASCADE"
-            )
+    _run_column_migrations(conn)
     conn.commit()
     conn.close()
     _seed_admin()

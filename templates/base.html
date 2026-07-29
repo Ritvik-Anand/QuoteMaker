@@ -3,14 +3,14 @@
 <head>
   <meta charset="UTF-8"/>
   <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
-  <title>{% block title %}Bagula Mukhi{% endblock %} — Quotation Maker</title>
+  <title>{% block title %}Slate{% endblock %} — Quotation Maker</title>
   <link rel="stylesheet" href="/static/style.css"/>
 </head>
 <body>
   <nav class="navbar">
     <div class="nav-brand">
       <span class="nav-logo">⚡</span>
-      <span class="nav-title">Bagula Mukhi</span>
+      <span class="nav-title">Slate</span>
       <span class="nav-sub">Quotation Maker</span>
     </div>
     <div class="nav-links">
@@ -21,7 +21,7 @@
       <div class="nav-user">
         <div class="nav-avatar" onclick="toggleUserMenu()">{{ session.username[0].upper() }}</div>
         <div class="user-menu hidden" id="user-menu">
-          <div class="user-menu-name">{{ session.username }}</div>
+          <div class="user-menu-name">{{ session.username }}<div class="user-menu-role">{{ 'Admin' if session.is_admin else 'Staff' }}</div></div>
           {% if session.is_admin %}
           <a href="/admin/users" class="user-menu-item">Manage Users</a>
           {% endif %}

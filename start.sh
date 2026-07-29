@@ -23,7 +23,7 @@ if [ -z "$DEEPSEEK_API_KEY" ]; then
   echo ""
 fi
 
-echo "Starting Bagula Mukhi Quotation Maker..."
+echo "Starting Slate Quotation Maker..."
 echo "Open: http://localhost:5050"
 echo ""
 .venv/bin/python app.py

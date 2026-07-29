@@ -1,4 +1,4 @@
-# Bagula Mukhi — Quotation Maker
+# Slate — Quotation Maker
 
 Web app for managing supplier price catalogs and generating professional quotations.
 

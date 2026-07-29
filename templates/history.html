@@ -8,7 +8,10 @@
 
 <div class="card">
   <div class="toolbar">
-    <input type="text" id="search-quotes" class="input" placeholder="Search by client or quote number…" oninput="filterQuotes()" />
+    <input type="text" id="search-quotes" class="input" placeholder="Search by client, quote number, or tag…" oninput="filterQuotes()" />
+    <select id="filter-user" class="input" style="max-width:220px" onchange="filterQuotes()">
+      <option value="">Everyone on the team</option>
+    </select>
   </div>
   <table class="data-table" id="quotes-table">
     <thead>
@@ -17,11 +20,13 @@
         <th>Client</th>
         <th>Date</th>
         <th>Items</th>
+        <th>Tags <span class="opt">(internal only)</span></th>
+        <th>Last worked on by</th>
         <th>Actions</th>
       </tr>
     </thead>
     <tbody id="quotes-tbody">
-      <tr><td colspan="5" class="empty-state">Loading…</td></tr>
+      <tr><td colspan="7" class="empty-state">Loading…</td></tr>
     </tbody>
   </table>
 </div>
@@ -29,32 +34,62 @@
 {% block scripts %}
 <script>
 let allQuotes = [];
+const AVATAR_COLORS = ['#4f46e5','#0891b2','#059669','#d97706','#db2777','#7c3aed','#dc2626'];
+
+function avatarColor(name) {
+  let hash = 0;
+  for (const ch of String(name || '?')) hash = (hash * 31 + ch.charCodeAt(0)) >>> 0;
+  return AVATAR_COLORS[hash % AVATAR_COLORS.length];
+}
 
 async function loadHistory() {
   allQuotes = await fetch('/api/quotations').then(r => r.json());
-  renderQuotes(allQuotes);
+  const users = [...new Set(allQuotes.map(q => q.updated_by || q.created_by).filter(Boolean))].sort();
+  const sel = document.getElementById('filter-user');
+  users.forEach(u => {
+    const o = document.createElement('option');
+    o.value = u; o.textContent = u;
+    sel.appendChild(o);
+  });
+  const urlUser = new URLSearchParams(location.search).get('user');
+  if (urlUser) { sel.value = urlUser; filterQuotes(); }
+  else renderQuotes(allQuotes);
 }
 
 function filterQuotes() {
   const q = document.getElementById('search-quotes').value.toLowerCase();
+  const userFilter = document.getElementById('filter-user').value;
   renderQuotes(allQuotes.filter(x =>
-    x.quote_number.toLowerCase().includes(q) ||
-    x.client_name.toLowerCase().includes(q)
+    (x.quote_number.toLowerCase().includes(q) ||
+     x.client_name.toLowerCase().includes(q) ||
+     (x.tags || '').toLowerCase().includes(q)) &&
+    (!userFilter || x.updated_by === userFilter || x.created_by === userFilter)
   ));
 }
 
 function renderQuotes(quotes) {
   const tbody = document.getElementById('quotes-tbody');
   if (!quotes.length) {
-    tbody.innerHTML = '<tr><td colspan="5" class="empty-state">No quotations found</td></tr>';
+    tbody.innerHTML = '<tr><td colspan="7" class="empty-state">No quotations found</td></tr>';
     return;
   }
-  tbody.innerHTML = quotes.map(q => `
+  tbody.innerHTML = quotes.map(q => {
+    const worker = q.updated_by || q.created_by || 'Unknown';
+    const isEdit = q.updated_by && q.updated_by !== q.created_by;
+    return `
     <tr>
-      <td><strong>${q.quote_number}</strong></td>
-      <td>${q.client_name}</td>
-      <td>${q.date}</td>
+      <td><strong>${esc(q.quote_number)}</strong></td>
+      <td>${esc(q.client_name)}</td>
+      <td>${esc(q.date)}</td>
       <td><span class="badge">${q.item_count} items</span></td>
+      <td>${(q.tags || '').split(',').map(t => t.trim()).filter(Boolean).map(t => `<span class="badge tag-badge">${esc(t)}</span>`).join(' ') || '—'}</td>
+      <td>
+        <div class="attribution" title="${isEdit ? `Created by ${esc(q.created_by)}, last edited by ${esc(worker)}` : `Created by ${esc(worker)}`}">
+          <span class="avatar-chip" style="background:${avatarColor(worker)}22;color:${avatarColor(worker)}">${esc(worker[0] || '?').toUpperCase()}</span>
+          <span>${esc(worker)}</span>
+          ${isEdit ? '<span class="dot"></span><span>edited</span>' : ''}
+        </div>
+      </td>
       <td class="actions-cell">
         <a href="/quotation/${q.id}/edit" class="btn btn-sm">Edit</a>
         <a href="/api/quotations/${q.id}/export/pdf" class="btn btn-sm" target="_blank">PDF</a>
@@ -62,7 +97,8 @@ function renderQuotes(quotes) {
         <button class="btn btn-sm btn-danger" onclick="deleteQuote(${q.id})">Delete</button>
       </td>
     </tr>
-  `).join('');
+  `;
+  }).join('');
 }
 
 async function deleteQuote(id) {
@@ -71,6 +107,8 @@ async function deleteQuote(id) {
   allQuotes = allQuotes.filter(q => q.id !== id);
   renderQuotes(allQuotes);
 }
+
+function esc(s) { return String(s||'').replace(/&/g,'&amp;').replace(/"/g,'&quot;').replace(/</g,'&lt;'); }
 
 loadHistory();
 </script>

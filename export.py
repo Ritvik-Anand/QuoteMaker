@@ -1,4 +1,5 @@
 import io
+import os
 from datetime import datetime
 from reportlab.lib.pagesizes import A4
 from reportlab.lib import colors
@@ -8,14 +9,24 @@ from reportlab.platypus import (
 )
 from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
 from reportlab.lib.enums import TA_CENTER, TA_RIGHT, TA_LEFT
+from reportlab.pdfbase import pdfmetrics
+from reportlab.pdfbase.ttfonts import TTFont
 import openpyxl
 from openpyxl.styles import Font, Alignment, PatternFill, Border, Side
 
 
-BRAND_COLOR = colors.HexColor("#1a3c5e")
-ACCENT_COLOR = colors.HexColor("#e8f0fe")
-LIGHT_GRAY = colors.HexColor("#f5f5f5")
-MID_GRAY = colors.HexColor("#cccccc")
+# ReportLab's built-in Helvetica/Vera fonts have no glyph for ₹ (U+20B9) — it
+# renders as a solid black box. DejaVu Sans covers it, so we embed it instead.
+_FONTS_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "fonts")
+pdfmetrics.registerFont(TTFont("DejaVuSans", os.path.join(_FONTS_DIR, "DejaVuSans.ttf")))
+pdfmetrics.registerFont(TTFont("DejaVuSans-Bold", os.path.join(_FONTS_DIR, "DejaVuSans-Bold.ttf")))
+FONT = "DejaVuSans"
+FONT_BOLD = "DejaVuSans-Bold"
+
+BRAND_COLOR = colors.HexColor("#2c5f8a")
+ACCENT_COLOR = colors.HexColor("#eef4fa")
+LIGHT_GRAY = colors.HexColor("#f7f7f7")
+MID_GRAY = colors.HexColor("#dddddd")
 
 
 def _compute_totals(quote_items, gst_rate):
@@ -42,15 +53,15 @@ def generate_pdf(quotation: dict, quote_items: list[dict]) -> bytes:
     # Header
     header_data = [[
         Paragraph(
-            '<font color="#1a3c5e" size="20"><b>BAGULA MUKHI</b></font><br/>'
-            '<font color="#555555" size="9">Electrical Goods Supplier</font>',
-            ParagraphStyle("h", fontName="Helvetica", alignment=TA_LEFT)
+            f'<font color="#2c5f8a" size="20"><b>BAGULA MUKHI</b></font><br/>'
+            f'<font color="#777777" size="9">Electrical Goods Supplier</font>',
+            ParagraphStyle("h", fontName=FONT, alignment=TA_LEFT)
         ),
         Paragraph(
-            f'<font color="#1a3c5e" size="14"><b>QUOTATION</b></font><br/>'
-            f'<font color="#333333" size="9">No: <b>{quotation["quote_number"]}</b></font><br/>'
-            f'<font color="#333333" size="9">Date: {quotation["date"]}</font>',
-            ParagraphStyle("h2", fontName="Helvetica", alignment=TA_RIGHT)
+            f'<font color="#2c5f8a" size="14"><b>QUOTATION</b></font><br/>'
+            f'<font color="#555555" size="9">No: <b>{quotation["quote_number"]}</b></font><br/>'
+            f'<font color="#555555" size="9">Date: {quotation["date"]}</font>',
+            ParagraphStyle("h2", fontName=FONT, alignment=TA_RIGHT)
         ),
     ]]
     header_table = Table(header_data, colWidths=[95 * mm, 85 * mm])
@@ -60,33 +71,33 @@ def generate_pdf(quotation: dict, quote_items: list[dict]) -> bytes:
         ("BOTTOMPADDING", (0, 0), (-1, -1), 4),
     ]))
     story.append(header_table)
-    story.append(HRFlowable(width="100%", thickness=2, color=BRAND_COLOR, spaceAfter=6))
+    story.append(HRFlowable(width="100%", thickness=1, color=MID_GRAY, spaceAfter=6))
 
     # Client block
     client_info = f"<b>To:</b> {quotation['client_name']}"
     if quotation.get("client_address"):
         client_info += f"<br/>{quotation['client_address'].replace(chr(10), '<br/>')}"
     story.append(Paragraph(client_info, ParagraphStyle(
-        "client", fontName="Helvetica", fontSize=10, leading=14, spaceAfter=8
+        "client", fontName=FONT, fontSize=10, leading=14, spaceAfter=8, textColor=colors.HexColor("#333333")
     )))
 
     # Items table
     col_widths = [12 * mm, 20 * mm, 68 * mm, 15 * mm, 15 * mm, 22 * mm, 25 * mm]
     table_data = [[
-        Paragraph("<b>#</b>", ParagraphStyle("th", fontName="Helvetica-Bold", fontSize=8, alignment=TA_CENTER)),
-        Paragraph("<b>Code</b>", ParagraphStyle("th", fontName="Helvetica-Bold", fontSize=8, alignment=TA_CENTER)),
-        Paragraph("<b>Description</b>", ParagraphStyle("th", fontName="Helvetica-Bold", fontSize=8)),
-        Paragraph("<b>Unit</b>", ParagraphStyle("th", fontName="Helvetica-Bold", fontSize=8, alignment=TA_CENTER)),
-        Paragraph("<b>Qty</b>", ParagraphStyle("th", fontName="Helvetica-Bold", fontSize=8, alignment=TA_CENTER)),
-        Paragraph("<b>Rate (₹)</b>", ParagraphStyle("th", fontName="Helvetica-Bold", fontSize=8, alignment=TA_RIGHT)),
-        Paragraph("<b>Amount (₹)</b>", ParagraphStyle("th", fontName="Helvetica-Bold", fontSize=8, alignment=TA_RIGHT)),
+        Paragraph("<b>#</b>", ParagraphStyle("th", fontName=FONT_BOLD, fontSize=8, alignment=TA_CENTER)),
+        Paragraph("<b>Code</b>", ParagraphStyle("th", fontName=FONT_BOLD, fontSize=8, alignment=TA_CENTER)),
+        Paragraph("<b>Description</b>", ParagraphStyle("th", fontName=FONT_BOLD, fontSize=8)),
+        Paragraph("<b>Unit</b>", ParagraphStyle("th", fontName=FONT_BOLD, fontSize=8, alignment=TA_CENTER)),
+        Paragraph("<b>Qty</b>", ParagraphStyle("th", fontName=FONT_BOLD, fontSize=8, alignment=TA_CENTER)),
+        Paragraph("<b>Rate (₹)</b>", ParagraphStyle("th", fontName=FONT_BOLD, fontSize=8, alignment=TA_RIGHT)),
+        Paragraph("<b>Amount (₹)</b>", ParagraphStyle("th", fontName=FONT_BOLD, fontSize=8, alignment=TA_RIGHT)),
     ]]
 
     for i, item in enumerate(quote_items, 1):
         amount = item["quantity"] * item["final_price"]
-        row_style = ParagraphStyle("td", fontName="Helvetica", fontSize=8, leading=11)
-        row_style_r = ParagraphStyle("tdr", fontName="Helvetica", fontSize=8, leading=11, alignment=TA_RIGHT)
-        row_style_c = ParagraphStyle("tdc", fontName="Helvetica", fontSize=8, leading=11, alignment=TA_CENTER)
+        row_style = ParagraphStyle("td", fontName=FONT, fontSize=8, leading=11)
+        row_style_r = ParagraphStyle("tdr", fontName=FONT, fontSize=8, leading=11, alignment=TA_RIGHT)
+        row_style_c = ParagraphStyle("tdc", fontName=FONT, fontSize=8, leading=11, alignment=TA_CENTER)
         table_data.append([
             Paragraph(str(i), row_style_c),
             Paragraph(item.get("code") or "-", row_style_c),
@@ -99,8 +110,8 @@ def generate_pdf(quotation: dict, quote_items: list[dict]) -> bytes:
 
     items_table = Table(table_data, colWidths=col_widths, repeatRows=1)
     ts = TableStyle([
-        ("BACKGROUND", (0, 0), (-1, 0), BRAND_COLOR),
-        ("TEXTCOLOR", (0, 0), (-1, 0), colors.white),
+        ("BACKGROUND", (0, 0), (-1, 0), ACCENT_COLOR),
+        ("TEXTCOLOR", (0, 0), (-1, 0), BRAND_COLOR),
         ("ROWBACKGROUNDS", (0, 1), (-1, -1), [colors.white, LIGHT_GRAY]),
         ("GRID", (0, 0), (-1, -1), 0.5, MID_GRAY),
         ("TOPPADDING", (0, 0), (-1, -1), 4),
@@ -125,8 +136,8 @@ def generate_pdf(quotation: dict, quote_items: list[dict]) -> bytes:
     totals_table = Table(totals_data, colWidths=[115 * mm, 35 * mm, 27 * mm])
     totals_table.setStyle(TableStyle([
         ("ALIGN", (1, 0), (-1, -1), "RIGHT"),
-        ("FONTNAME", (1, 0), (1, 1), "Helvetica"),
-        ("FONTNAME", (1, 2), (-1, 2), "Helvetica-Bold"),
+        ("FONTNAME", (0, 0), (-1, -1), FONT),
+        ("FONTNAME", (1, 2), (-1, 2), FONT_BOLD),
         ("FONTSIZE", (0, 0), (-1, -1), 9),
         ("FONTSIZE", (1, 2), (-1, 2), 10),
         ("LINEABOVE", (1, 2), (-1, 2), 1, BRAND_COLOR),
@@ -142,15 +153,15 @@ def generate_pdf(quotation: dict, quote_items: list[dict]) -> bytes:
         story.append(HRFlowable(width="100%", thickness=0.5, color=MID_GRAY, spaceAfter=4))
         story.append(Paragraph(
             f"<b>Notes:</b> {quotation['notes']}",
-            ParagraphStyle("notes", fontName="Helvetica", fontSize=8, textColor=colors.HexColor("#555555"))
+            ParagraphStyle("notes", fontName=FONT, fontSize=8, textColor=colors.HexColor("#555555"))
         ))
 
     # Footer
     story.append(Spacer(1, 6 * mm))
-    story.append(HRFlowable(width="100%", thickness=1, color=BRAND_COLOR, spaceAfter=3))
+    story.append(HRFlowable(width="100%", thickness=0.5, color=MID_GRAY, spaceAfter=3))
     story.append(Paragraph(
         "Thank you for your business. This is a computer-generated quotation.",
-        ParagraphStyle("footer", fontName="Helvetica", fontSize=7, textColor=colors.HexColor("#777777"), alignment=TA_CENTER)
+        ParagraphStyle("footer", fontName=FONT, fontSize=7, textColor=colors.HexColor("#999999"), alignment=TA_CENTER)
     ))
 
     doc.build(story)

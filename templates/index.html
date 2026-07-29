@@ -56,20 +56,29 @@ async function loadDashboard() {
     el.innerHTML = '<div class="empty-state">No quotations yet. <a href="/quotation/new">Create one →</a></div>';
     return;
   }
-  el.innerHTML = quotes.slice(0, 8).map(q => `
+  el.innerHTML = quotes.slice(0, 8).map(q => {
+    const total = q.subtotal * (1 + (q.gst_rate || 0) / 100);
+    const tags = (q.tags || '').split(',').map(t => t.trim()).filter(Boolean);
+    const worker = q.updated_by || q.created_by;
+    return `
     <div class="quote-row">
       <div>
-        <div class="quote-num">${q.quote_number}</div>
-        <div class="quote-client">${q.client_name}</div>
+        <div class="quote-num">${esc(q.quote_number)}</div>
+        <div class="quote-client">${esc(q.client_name)}</div>
+        ${worker ? `<div class="attribution" style="margin-top:3px"><span class="avatar-chip">${esc(worker[0]).toUpperCase()}</span><span>${esc(worker)}</span></div>` : ''}
+        ${tags.length ? `<div class="quote-tags">${tags.map(t => `<span class="badge tag-badge">${esc(t)}</span>`).join(' ')}</div>` : ''}
       </div>
       <div class="quote-meta">
+        <span class="quote-amount">₹ ${total.toLocaleString('en-IN', {minimumFractionDigits:2, maximumFractionDigits:2})}</span>
         <span class="badge">${q.item_count} items</span>
-        <span class="quote-date">${q.date}</span>
+        <span class="quote-date">${esc(q.date)}</span>
         <a href="/quotation/${q.id}/edit" class="btn btn-sm">Open</a>
       </div>
     </div>
-  `).join('');
+  `;
+  }).join('');
 }
+function esc(s) { return String(s||'').replace(/&/g,'&amp;').replace(/"/g,'&quot;').replace(/</g,'&lt;'); }
 loadDashboard();
 </script>
 {% endblock %}
