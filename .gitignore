@@ -9,3 +9,5 @@ quotations/
 uploads/
 test_start.py
 /tmp/
+.vercel
+.env*
