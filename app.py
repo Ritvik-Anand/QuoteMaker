@@ -322,7 +322,9 @@ def search_items():
     params = []
     where = []
     if q:
-        where.append("(i.description LIKE ? OR i.code LIKE ?)")
+        # LIKE is case-sensitive on Postgres but not SQLite — LOWER() on both
+        # sides keeps search behavior identical (and case-insensitive) on both.
+        where.append("(LOWER(i.description) LIKE LOWER(?) OR LOWER(i.code) LIKE LOWER(?))")
         params += [f"%{q}%", f"%{q}%"]
     if supplier_id:
         where.append("i.supplier_id = ?")
