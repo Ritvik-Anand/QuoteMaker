@@ -523,6 +523,11 @@ def export_excel(qid):
                      as_attachment=True, download_name=f"{q['quote_number']}.xlsx")
 
 
+# Runs on import so it also fires under Vercel's serverless WSGI handler
+# (api/index.py imports `app` directly — the __main__ guard below never runs there).
+# init_db() is idempotent (CREATE TABLE IF NOT EXISTS + column-exists checks),
+# so re-running it on each cold start is safe.
+init_db()
+
 if __name__ == "__main__":
-    init_db()
     app.run(debug=False, port=5050)
