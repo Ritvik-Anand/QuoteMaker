@@ -523,6 +523,76 @@ def export_excel(qid):
                      as_attachment=True, download_name=f"{q['quote_number']}.xlsx")
 
 
+# ── One-time local→prod data migration (TEMPORARY — remove after use) ──────────
+
+@app.route("/api/admin/migrate-import", methods=["POST"])
+@admin_required
+def migrate_import():
+    data = request.json
+    conn = get_db()
+    try:
+        supplier_map = {}
+        for s in data.get("suppliers", []):
+            new_id = conn.insert("INSERT INTO suppliers (name) VALUES (?)", (s["name"],))
+            supplier_map[s["id"]] = new_id
+        conn.commit()
+
+        catalog_map = {}
+        for c in data.get("catalogs", []):
+            new_id = conn.insert(
+                "INSERT INTO catalogs (supplier_id, name, item_count) VALUES (?,?,?)",
+                (supplier_map[c["supplier_id"]], c["name"], c["item_count"])
+            )
+            catalog_map[c["id"]] = new_id
+        conn.commit()
+
+        item_map = {}
+        for i in data.get("items", []):
+            new_id = conn.insert(
+                "INSERT INTO items (supplier_id, catalog_id, code, description, unit, base_price) "
+                "VALUES (?,?,?,?,?,?)",
+                (supplier_map[i["supplier_id"]], catalog_map.get(i.get("catalog_id")),
+                 i.get("code", ""), i["description"], i.get("unit", "Nos"), float(i["base_price"]))
+            )
+            item_map[i["id"]] = new_id
+        conn.commit()
+
+        quote_map = {}
+        for q in data.get("quotations", []):
+            new_id = conn.insert(
+                "INSERT INTO quotations (quote_number, client_name, client_address, date, gst_rate, "
+                "notes, tags, created_by, updated_by) VALUES (?,?,?,?,?,?,?,?,?)",
+                (q["quote_number"], q["client_name"], q.get("client_address", ""), q["date"],
+                 float(q.get("gst_rate", 18)), q.get("notes", ""), q.get("tags", ""),
+                 q.get("created_by", ""), q.get("updated_by", ""))
+            )
+            quote_map[q["id"]] = new_id
+        conn.commit()
+
+        qi_count = 0
+        for qi in data.get("quotation_items", []):
+            conn.execute(
+                "INSERT INTO quotation_items (quotation_id, item_id, description, code, unit, quantity, "
+                "base_price, adjustment_type, adjustment_value, final_price, sort_order, supplier_name) "
+                "VALUES (?,?,?,?,?,?,?,?,?,?,?,?)",
+                (quote_map[qi["quotation_id"]], item_map.get(qi.get("item_id")),
+                 qi["description"], qi.get("code", ""), qi.get("unit", "Nos"), float(qi["quantity"]),
+                 float(qi["base_price"]), qi.get("adjustment_type", "none"),
+                 float(qi.get("adjustment_value", 0)), float(qi["final_price"]),
+                 qi.get("sort_order", 0), qi.get("supplier_name", ""))
+            )
+            qi_count += 1
+        conn.commit()
+    except Exception as e:
+        conn.close()
+        return jsonify({"error": str(e)}), 400
+    conn.close()
+    return jsonify({
+        "ok": True, "suppliers": len(supplier_map), "catalogs": len(catalog_map),
+        "items": len(item_map), "quotations": len(quote_map), "quotation_items": qi_count,
+    })
+
+
 # Runs on import so it also fires under Vercel's serverless WSGI handler
 # (api/index.py imports `app` directly — the __main__ guard below never runs there).
 # init_db() is idempotent (CREATE TABLE IF NOT EXISTS + column-exists checks),
