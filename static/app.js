@@ -14,6 +14,7 @@ document.addEventListener('keydown', e => {
   if (e.key === 'Escape') {
     document.querySelectorAll('.modal:not(.hidden)').forEach(m => m.classList.add('hidden'));
     closeUserMenu();
+    closeMobileMenu();
   }
 });
 
@@ -29,6 +30,23 @@ function closeUserMenu() {
 document.addEventListener('click', e => {
   if (!e.target.closest('.nav-user')) closeUserMenu();
 });
+
+// Mobile nav drawer
+function toggleMobileMenu() {
+  document.getElementById('mobile-drawer')?.classList.contains('open') ? closeMobileMenu() : openMobileMenu();
+}
+
+function openMobileMenu() {
+  document.getElementById('mobile-drawer')?.classList.add('open');
+  document.getElementById('mobile-drawer-overlay')?.classList.add('open');
+  document.body.classList.add('drawer-open');
+}
+
+function closeMobileMenu() {
+  document.getElementById('mobile-drawer')?.classList.remove('open');
+  document.getElementById('mobile-drawer-overlay')?.classList.remove('open');
+  document.body.classList.remove('drawer-open');
+}
 
 // Toast
 function showToast(msg) {

@@ -15,6 +15,9 @@
 </head>
 <body>
   <nav class="navbar">
+    <button class="hamburger-btn" onclick="toggleMobileMenu()" aria-label="Open menu">
+      <span></span><span></span><span></span>
+    </button>
     <div class="nav-brand">
       <img class="nav-logo" src="/static/icons/icon-192.png" alt="Slate"/>
       <span class="nav-title">Slate</span>
@@ -40,6 +43,36 @@
       </div>
     </div>
   </nav>
+
+  <div class="mobile-drawer-overlay" id="mobile-drawer-overlay" onclick="closeMobileMenu()"></div>
+  <aside class="mobile-drawer" id="mobile-drawer">
+    <div class="mobile-drawer-header">
+      <img class="nav-logo" src="/static/icons/icon-192.png" alt="Slate"/>
+      <span class="nav-title" style="color: var(--brand)">Slate</span>
+      <button class="mobile-drawer-close" onclick="closeMobileMenu()" aria-label="Close menu">&times;</button>
+    </div>
+    <div class="mobile-drawer-links">
+      <a href="/" class="mobile-drawer-link {% if request.path == '/' %}active{% endif %}">Dashboard</a>
+      <a href="/catalogs" class="mobile-drawer-link {% if request.path == '/catalogs' %}active{% endif %}">Catalogs</a>
+      <a href="/history" class="mobile-drawer-link {% if request.path == '/history' %}active{% endif %}">History</a>
+      <a href="/quotation/new" class="mobile-drawer-link">+ New Quote</a>
+    </div>
+    <div class="mobile-drawer-footer">
+      <div class="mobile-drawer-user">
+        <div class="nav-avatar">{{ session.username[0].upper() }}</div>
+        <div>
+          <div class="user-menu-name" style="border:none;padding:0">{{ session.username }}</div>
+          <div class="user-menu-role">{{ 'Admin' if session.is_admin else 'Staff' }}</div>
+        </div>
+      </div>
+      {% if session.is_admin %}
+      <a href="/admin/users" class="mobile-drawer-link">Manage Users</a>
+      {% endif %}
+      <a href="/change-password" class="mobile-drawer-link">Change Password</a>
+      <a href="/logout" class="mobile-drawer-link danger">Sign Out</a>
+    </div>
+  </aside>
+
   <main class="main">
     {% block content %}{% endblock %}
   </main>
