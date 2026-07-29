@@ -48,7 +48,21 @@
     .error-banner { margin-bottom: 4px; }
 
     @media (max-width: 860px) {
-      .auth-brand-panel { display: none; }
+      body { min-height: auto; }
+      .auth-shell { flex-direction: column; min-height: auto; }
+      .auth-panel { padding: 28px 24px; }
+      .auth-brand-panel {
+        flex: none; min-height: auto; padding: 30px 24px 26px;
+      }
+      .auth-brand-content { max-width: none; }
+      .auth-logo { width: 38px; height: 38px; font-size: 17px; border-radius: 10px; margin-bottom: 14px; }
+      .auth-brand-content h2 { font-size: 21px; margin-bottom: 5px; }
+      .auth-brand-content p { font-size: 13px; }
+      .auth-feature-list { display: none; }
+      .auth-panel:not(.auth-brand-panel) { flex: none; justify-content: flex-start; }
+      .login-logo { margin-bottom: 20px; }
+      .login-logo .icon, .login-logo h1 { display: none; }
+      .login-logo p { font-size: 14px; font-weight: 600; color: var(--text); }
     }
   </style>
 </head>

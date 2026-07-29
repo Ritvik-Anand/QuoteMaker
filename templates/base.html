@@ -20,11 +20,13 @@
       <span class="nav-title">Slate</span>
       <span class="nav-sub">Quotation Maker</span>
     </div>
-    <div class="nav-links">
-      <a href="/" class="nav-link {% if request.path == '/' %}active{% endif %}">Dashboard</a>
-      <a href="/catalogs" class="nav-link {% if request.path == '/catalogs' %}active{% endif %}">Catalogs</a>
-      <a href="/history" class="nav-link {% if request.path == '/history' %}active{% endif %}">History</a>
-      <a href="/quotation/new" class="btn btn-primary">+ New Quote</a>
+    <div class="nav-right">
+      <div class="nav-links">
+        <a href="/" class="nav-link {% if request.path == '/' %}active{% endif %}">Dashboard</a>
+        <a href="/catalogs" class="nav-link {% if request.path == '/catalogs' %}active{% endif %}">Catalogs</a>
+        <a href="/history" class="nav-link {% if request.path == '/history' %}active{% endif %}">History</a>
+        <a href="/quotation/new" class="btn btn-primary">+ New Quote</a>
+      </div>
       <div class="nav-user">
         <div class="nav-avatar" onclick="toggleUserMenu()">{{ session.username[0].upper() }}</div>
         <div class="user-menu hidden" id="user-menu">

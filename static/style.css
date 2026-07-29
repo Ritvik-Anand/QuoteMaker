@@ -62,7 +62,8 @@ a { color: inherit; }
 }
 .nav-title { font-family: 'Inter Tight', sans-serif; font-size: 17px; font-weight: 800; letter-spacing: -.03em; }
 .nav-sub { font-size: 11px; color: rgba(255,255,255,.5); margin-top: 1px; font-weight: 500; }
-.nav-links { display: flex; align-items: center; gap: 4px; }
+.nav-right { display: flex; align-items: center; gap: 4px; min-width: 0; }
+.nav-links { display: flex; align-items: center; gap: 4px; min-width: 0; }
 .nav-link {
   color: rgba(255,255,255,.72); text-decoration: none; padding: 7px 13px; border-radius: 8px;
   font-weight: 500; font-size: 13.5px; transition: background .15s var(--ease), color .15s var(--ease);
@@ -315,12 +316,46 @@ textarea.input { resize: vertical; }
 /* ── User avatar with color ── */
 .user-avatar-lg { width: 36px; height: 36px; border-radius: 50%; display: flex; align-items: center; justify-content: center; font-weight: 700; font-size: 14px; color: #fff; flex-shrink: 0; }
 
+/* Belt-and-suspenders: nothing on the page should ever force horizontal
+   scroll of the whole document — wide content scrolls within its own box. */
+html, body { max-width: 100%; overflow-x: hidden; }
+.table-wrap, .items-table-wrap { overflow-x: auto; }
+
 @media (max-width: 768px) {
   .quote-layout { flex-direction: column; }
+  .quote-main { width: 100%; }
   .quote-sidebar { width: 100%; }
+  /* Flex/grid items default to a min-width of their content's min-content
+     size, which lets a wide descendant (a stubborn <input type=date>, a
+     data table, ...) silently force every ancestor wider than the screen.
+     Resetting min-width:0 at each nested flex/grid boundary is the only
+     way to make "it just fits the viewport" actually true. */
+  .quote-main, .card, .form-grid, .form-group, .items-table-wrap { min-width: 0; }
   .form-grid { grid-template-columns: 1fr; }
   .stats-grid { grid-template-columns: 1fr; }
   .section-row { flex-direction: column; }
-  .navbar { padding: 0 14px; }
   .nav-sub { display: none; }
+  .main { padding: 20px 14px 40px; }
+  .card-header { flex-wrap: wrap; gap: 10px; }
+  .global-adj { flex-wrap: wrap; width: 100%; }
+
+  /* Navbar: brand on its own row, links + avatar wrap to a second row
+     below it as a horizontally-scrollable pill bar instead of overflowing
+     the whole page. */
+  .navbar { flex-wrap: wrap; height: auto; padding: 10px 14px; row-gap: 8px; }
+  .nav-right { width: 100%; justify-content: space-between; gap: 8px; }
+  .nav-links {
+    overflow-x: auto; flex: 1; min-width: 0; -webkit-overflow-scrolling: touch;
+    scrollbar-width: none;
+  }
+  .nav-links::-webkit-scrollbar { display: none; }
+  .nav-links .nav-link, .nav-links .btn { flex-shrink: 0; }
+  .nav-user { flex-shrink: 0; margin-left: 0; }
+
+  /* Dashboard quote rows: stack instead of squeezing everything onto one line. */
+  .quote-row { flex-direction: column; align-items: flex-start; gap: 8px; }
+  .quote-meta { flex-wrap: wrap; width: 100%; }
+
+  /* History table actions: let them wrap instead of forcing table width up. */
+  .actions-cell { flex-wrap: wrap; }
 }
