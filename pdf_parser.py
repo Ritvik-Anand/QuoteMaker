@@ -86,6 +86,48 @@ def _table_to_text(table: list) -> str:
     return "\n".join(lines)
 
 
+def _extract_table_grid(page, t) -> list:
+    """
+    pdfplumber's table.extract() returns a cell of None (not "") when it
+    can't confidently bound that region — this happens on catalogs whose
+    ruling lines only span the header row, leaving data rows with no line
+    under them. pdfplumber then infers a truncated row bbox from whichever
+    line it did find, silently dropping whole columns (often the price
+    column) even though the text is sitting right there on the page. Patch
+    just those None cells back in by cropping the reference column's x-range
+    against that row's own (still-accurate) y-range and reading the text
+    directly — a no-op for normal tables where nothing came back None.
+    """
+    raw = t.extract()
+    if not raw:
+        return raw
+    rows_meta = t.rows
+    ref_cells = max(
+        (r.cells for r in rows_meta if r.cells),
+        key=lambda cells: sum(1 for c in cells if c),
+        default=None,
+    )
+    if not ref_cells:
+        return raw
+
+    patched = [list(row) for row in raw]
+    for ri, row_obj in enumerate(rows_meta):
+        if ri >= len(patched):
+            break
+        row_top, row_bottom = row_obj.bbox[1], row_obj.bbox[3]
+        for ci, cell in enumerate(row_obj.cells):
+            if cell is not None or ci >= len(ref_cells) or not ref_cells[ci]:
+                continue
+            x0, x1 = ref_cells[ci][0], ref_cells[ci][2]
+            try:
+                text = page.crop((x0, row_top, x1, row_bottom)).extract_text(x_tolerance=2, y_tolerance=2)
+            except Exception:
+                text = None
+            if text and ci < len(patched[ri]):
+                patched[ri][ci] = text.replace("\n", " ").strip()
+    return patched
+
+
 def _extract_page_text(page) -> str:
     """
     Render one page as plain text with table regions swapped out for clean
@@ -128,7 +170,7 @@ def _extract_page_text(page) -> str:
     blocks = [(top, text) for top, text in blocks if text]
 
     for t in tables:
-        grid = _table_to_text(t.extract())
+        grid = _table_to_text(_extract_table_grid(page, t))
         if grid:
             blocks.append((t.bbox[1], grid))
 

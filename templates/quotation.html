@@ -8,8 +8,13 @@
   </div>
   <div class="header-actions">
     <button class="btn btn-outline" onclick="saveQuotation()">💾 Save</button>
-    <button class="btn btn-outline" id="btn-share" style="display:none" onclick="shareQuote(QID)">🔗 Share</button>
-    <button class="btn btn-outline" id="btn-share-whatsapp" style="display:none" onclick="shareQuoteWhatsApp(QID)" title="Share via WhatsApp">💬</button>
+    <div class="share-wrap" id="btn-share" style="display:none">
+      <button class="btn btn-outline" onclick="toggleShareMenu(this)">🔗 Share</button>
+      <div class="share-menu hidden">
+        <button class="share-menu-item" onclick="copyShareLink(QID)">📋 Copy Link</button>
+        <button class="share-menu-item" onclick="shareViaWhatsApp(QID, document.getElementById('client-name').value)">💬 Send via WhatsApp</button>
+      </div>
+    </div>
     <button class="btn btn-outline" id="btn-export-pdf" style="display:none" onclick="exportQuote('pdf')">⬇ PDF</button>
     <button class="btn btn-outline" id="btn-export-excel" style="display:none" onclick="exportQuote('excel')">⬇ Excel</button>
   </div>
@@ -145,7 +150,6 @@ async function init() {
   if (QID) {
     document.getElementById('page-title').textContent = 'Edit Quotation';
     document.getElementById('btn-share').style.display = '';
-    document.getElementById('btn-share-whatsapp').style.display = '';
     document.getElementById('btn-export-pdf').style.display = '';
     document.getElementById('btn-export-excel').style.display = '';
     document.getElementById('export-btns').style.display = '';

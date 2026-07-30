@@ -92,8 +92,13 @@ function renderQuotes(quotes) {
       </td>
       <td class="actions-cell">
         <a href="/quotation/${q.id}/edit" class="btn btn-sm">Edit</a>
-        <button class="btn btn-sm" onclick="shareQuote(${q.id})">🔗 Share</button>
-        <button class="btn btn-sm" onclick="shareQuoteWhatsApp(${q.id})" title="Share via WhatsApp">💬</button>
+        <div class="share-wrap">
+          <button class="btn btn-sm" onclick="toggleShareMenu(this)">🔗 Share</button>
+          <div class="share-menu hidden">
+            <button class="share-menu-item" onclick="copyShareLink(${q.id})">📋 Copy Link</button>
+            <button class="share-menu-item" onclick="shareViaWhatsApp(${q.id}, '${esc(jsAttr(q.client_name))}')">💬 Send via WhatsApp</button>
+          </div>
+        </div>
         <a href="/api/quotations/${q.id}/export/pdf" class="btn btn-sm" target="_blank">PDF</a>
         <a href="/api/quotations/${q.id}/export/excel" class="btn btn-sm">Excel</a>
         <button class="btn btn-sm btn-danger" onclick="deleteQuote(${q.id})">Delete</button>
@@ -111,6 +116,10 @@ async function deleteQuote(id) {
 }
 
 function esc(s) { return String(s||'').replace(/&/g,'&amp;').replace(/"/g,'&quot;').replace(/</g,'&lt;'); }
+
+// For values embedded as a single-quoted JS string literal inside an
+// onclick="..." (double-quoted) HTML attribute.
+function jsAttr(s) { return String(s||'').replace(/\\/g,'\\\\').replace(/'/g,"\\'").replace(/\n/g,' '); }
 
 loadHistory();
 </script>

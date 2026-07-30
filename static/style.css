@@ -347,6 +347,13 @@ textarea.input { resize: vertical; }
 .user-menu-item:hover { background: var(--bg); }
 .user-menu-item.danger { color: var(--danger); border-top: 1px solid var(--border-soft); }
 
+/* ── Share menu ── */
+.share-wrap { position: relative; display: inline-block; }
+.share-menu { position: absolute; left: 0; top: calc(100% + 8px); background: var(--card); border: 1px solid var(--border-soft); border-radius: var(--radius); box-shadow: var(--shadow-lg); min-width: 190px; z-index: 200; overflow: hidden; animation: slideUp .15s var(--ease); }
+.share-menu.hidden { display: none; }
+.share-menu-item { display: block; width: 100%; text-align: left; padding: 10px 15px; font-size: 13px; color: var(--text); background: none; border: none; cursor: pointer; transition: background .12s; font-weight: 500; }
+.share-menu-item:hover { background: var(--bg); }
+
 /* ── Banners ── */
 .error-banner { background: var(--danger-light); color: #991b1b; border: 1px solid #fecaca; border-radius: var(--radius-sm); padding: 11px 14px; font-size: 13px; font-weight: 500; }
 .success-banner { background: var(--success-light); color: #065f46; border: 1px solid #a7f3d0; border-radius: var(--radius-sm); padding: 11px 14px; font-size: 13px; font-weight: 500; }
