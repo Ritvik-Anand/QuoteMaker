@@ -128,7 +128,14 @@ def _extract_table_grid(page, t) -> list:
     return patched
 
 
-def _extract_page_text(page) -> str:
+# Matches a standalone heading line like "HT Single Core Power Cables..." or
+# "LT Power Cables - Copper Conductor" — deliberately requires "Cable"/"Power"
+# nearby so it doesn't fire on unrelated text that happens to start with the
+# letters HT/LT.
+_VOLTAGE_RE = re.compile(r"^(HT|LT)\b.*\b(Cables?|Power)\b")
+
+
+def _extract_page_text(page, voltage_state: list) -> str:
     """
     Render one page as plain text with table regions swapped out for clean
     grids, in top-to-bottom document order. Many catalogs put the variant name
@@ -138,10 +145,23 @@ def _extract_page_text(page) -> str:
     that heading; using only extract_text() scrambles multi-column tables. So
     we keep whichever text falls outside every table's bounding box (headings,
     captions) and splice in the clean table grid where the table itself sits.
+
+    `voltage_state` is a 1-element list holding the current HT/LT class across
+    the whole document (mutated in place so it persists across pages). Some
+    cable catalogs switch between HT and LT sections *mid-page*, and asking
+    the model to track that itself across a long combined chunk is exactly
+    how a whole HT section ends up mislabeled LT (or vice versa) — a single
+    wrong voltage class is a very expensive mistake, so it's tagged onto
+    every table deterministically here instead of trusted to the model's memory.
     """
     tables = page.find_tables()
     if not tables:
-        return (page.extract_text(x_tolerance=2, y_tolerance=2) or "").strip()
+        text = (page.extract_text(x_tolerance=2, y_tolerance=2) or "").strip()
+        for line in text.split("\n"):
+            m = _VOLTAGE_RE.match(line.strip())
+            if m:
+                voltage_state[0] = m.group(1)
+        return text
 
     def in_any_table(word):
         cx, cy = (word["x0"] + word["x1"]) / 2, (word["top"] + word["bottom"]) / 2
@@ -175,26 +195,46 @@ def _extract_page_text(page) -> str:
             blocks.append((t.bbox[1], grid))
 
     blocks.sort(key=lambda b: b[0])
-    return "\n".join(text for _, text in blocks)
+
+    # Walk the page top-to-bottom (its true reading order, now that headings
+    # and table grids are merged and sorted together) tagging every table
+    # with whatever HT/LT heading most recently preceded it.
+    tagged = []
+    for _, text in blocks:
+        is_table_grid = "|" in text
+        if not is_table_grid:
+            m = _VOLTAGE_RE.match(text.strip())
+            if m:
+                voltage_state[0] = m.group(1)
+            tagged.append(text)
+        elif voltage_state[0]:
+            tagged.append(f"[Voltage class for every row in this table: {voltage_state[0]}]\n{text}")
+        else:
+            tagged.append(text)
+    return "\n".join(tagged)
 
 
 def _extract_pages(pdf_bytes: bytes) -> list[str]:
     """Return list of per-page text strings, preferring structured tables."""
+    voltage_state = [None]  # shared/mutated across pages — see _extract_page_text
     with pdfplumber.open(io.BytesIO(pdf_bytes)) as pdf:
-        return [_extract_page_text(page) for page in pdf.pages]
+        return [_extract_page_text(page, voltage_state) for page in pdf.pages]
 
 
-def _chunk_pages(pages: list[str]) -> list[str]:
-    """Group pages into chunks that stay under CHUNK_CHARS."""
+def _chunk_pages(pages: list[str]) -> list[list[str]]:
+    """Group pages into chunks that stay under CHUNK_CHARS. Each chunk keeps
+    its page texts as a list (rather than pre-joining them) so that if the
+    model's response gets truncated, the retry logic can split cleanly on
+    page boundaries instead of cutting a table in half mid-row."""
     chunks, current, current_len = [], [], 0
     for text in pages:
         if current and current_len + len(text) > CHUNK_CHARS:
-            chunks.append("\n\n".join(current))
+            chunks.append(current)
             current, current_len = [], 0
         current.append(text)
         current_len += len(text)
     if current:
-        chunks.append("\n\n".join(current))
+        chunks.append(current)
     return chunks
 
 
@@ -251,18 +291,24 @@ Voltage class / LT vs HT (CRITICAL — this changes the product and the price,
 never guess or drop it):
 Cables are frequently split into completely separate sections or tables by
 voltage class — LT (Low Tension, e.g. 1.1 kV) vs HT (High Tension, e.g. 3.3 kV,
-6.6 kV, 11 kV, 22 kV, 33 kV) — sometimes as an explicit "LT"/"HT" label,
-sometimes only as the kV rating itself, and sometimes only as a heading above
-the table with no column for it at all (apply the same heading-inheritance
-rule as the variant sections above: every row below that heading belongs to
-that voltage class until the next heading changes it). Always carry the
-voltage class and/or exact kV rating from whatever heading, caption, or
-column it appears in through into every matching item's description — e.g.
-"70 sq. mm HT Single Core Power Cable - 6.6 kV (E)" vs "70 sq. mm HT Single
-Core Power Cable - 11 kV (E)" are different products at different prices and
-must both appear as separate items, never merged, never left ambiguous, and
-never silently dropped because it "looked" implied. If a size/spec appears
-at multiple voltage ratings, every one of them is a separate item.
+6.6 kV, 11 kV, 22 kV, 33 kV). A single catalog routinely switches between HT
+and LT sections more than once, sometimes mid-page, so do NOT assume the
+class from earlier in the document still applies — re-derive it fresh for
+every table. Some tables are preceded by a line we've already tagged for you
+like "[Voltage class for every row in this table: HT]" immediately above the
+table grid — that tag is authoritative for every row in that specific table
+and OVERRIDES anything you inferred from earlier context; if a later table
+has a different tag (or none), the class has changed (or is unstated) and
+you must not keep reusing the earlier one. Where no such tag is present,
+fall back to the heading-inheritance rule used for variant sections above
+(every row belongs to whatever heading sits directly over its table). Always
+carry the voltage class and/or exact kV rating through into every matching
+item's description — e.g. "70 sq. mm HT Single Core Power Cable - 6.6 kV
+(E)" vs "70 sq. mm HT Single Core Power Cable - 11 kV (E)" are different
+products at different prices and must both appear as separate items, never
+merged, never left ambiguous, and never silently carried over from a
+different table's class. If a size/spec appears at multiple voltage ratings,
+every one of them is a separate item.
 
 Rate-per-Mtr vs rate-per-Coil:
 If a variant has BOTH a "rate per coil"/"rate per 100 mtrs" style column AND a
@@ -281,11 +327,12 @@ Catalog text:
             response = client.chat.completions.create(
                 model=DEEPSEEK_MODEL,
                 messages=[{"role": "user", "content": prompt}],
-                max_tokens=8192,
+                max_tokens=16000,
                 temperature=0,
-                timeout=60,
+                timeout=120,
             )
             raw = response.choices[0].message.content.strip()
+            truncated = response.choices[0].finish_reason == "length"
             break
         except Exception as e:
             last_error = e
@@ -306,7 +353,7 @@ Catalog text:
     try:
         items = json.loads(raw)
     except json.JSONDecodeError:
-        return []
+        return [], truncated
 
     cleaned = []
     for item in items:
@@ -322,7 +369,41 @@ Catalog text:
                 })
         except (ValueError, TypeError):
             continue
-    return cleaned
+    return cleaned, truncated
+
+
+def _parse_pages_recursive(client: OpenAI, page_texts: list[str], supplier_name: str, depth: int = 0) -> list[dict]:
+    """
+    Parse a group of pages, automatically retrying with a smaller group
+    whenever the model's response gets cut off (finish_reason "length")
+    instead of silently keeping only the partial result — a dense table
+    (e.g. many core-count x construction-type combinations) can produce far
+    more output JSON than input text, and a catalog that's simply too big
+    for one completion must never be allowed to quietly lose data past
+    whatever it managed to fit before running out of tokens.
+    """
+    items, truncated = _parse_chunk(client, "\n\n".join(page_texts), supplier_name)
+    if not truncated or depth >= 6:
+        return items
+
+    if len(page_texts) > 1:
+        mid = max(len(page_texts) // 2, 1)
+        first, second = page_texts[:mid], page_texts[mid:]
+    else:
+        # A single page's own table was too dense to complete — fall back to
+        # splitting its raw text roughly in half on a line boundary. Rare in
+        # practice (most individual pages fit comfortably), but still better
+        # than accepting a silently-truncated result.
+        text = page_texts[0]
+        if len(text) < 800:
+            return items
+        split_at = text.rfind("\n", 0, len(text) // 2) or len(text) // 2
+        first, second = [text[:split_at]], [text[split_at:]]
+
+    return (
+        _parse_pages_recursive(client, first, supplier_name, depth + 1)
+        + _parse_pages_recursive(client, second, supplier_name, depth + 1)
+    )
 
 
 def _recover_json(raw: str) -> str:
@@ -380,9 +461,9 @@ def parse_catalog_pdf(pdf_bytes: bytes, supplier_name: str) -> list[dict]:
 
     all_items: list[dict] = []
     for chunk in chunks:
-        if not chunk.strip():
+        if not any(p.strip() for p in chunk):
             continue
-        items = _parse_chunk(client, chunk, supplier_name)
+        items = _parse_pages_recursive(client, chunk, supplier_name)
         all_items.extend(items)
 
     # Deduplicate by (description, base_price) keeping last occurrence
