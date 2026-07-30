@@ -8,6 +8,7 @@
   </div>
   <div class="header-actions">
     <button class="btn btn-outline" onclick="saveQuotation()">💾 Save</button>
+    <button class="btn btn-outline" id="btn-share" style="display:none" onclick="shareQuote(QID)">🔗 Share</button>
     <button class="btn btn-outline" id="btn-export-pdf" style="display:none" onclick="exportQuote('pdf')">⬇ PDF</button>
     <button class="btn btn-outline" id="btn-export-excel" style="display:none" onclick="exportQuote('excel')">⬇ Excel</button>
   </div>
@@ -142,10 +143,16 @@ async function init() {
 
   if (QID) {
     document.getElementById('page-title').textContent = 'Edit Quotation';
+    document.getElementById('btn-share').style.display = '';
     document.getElementById('btn-export-pdf').style.display = '';
     document.getElementById('btn-export-excel').style.display = '';
     document.getElementById('export-btns').style.display = '';
     const data = await fetch(`/api/quotations/${QID}`).then(r => r.json());
+    if (data.error) {
+      alert('This quotation no longer exists or the link is invalid.');
+      window.location.href = '/';
+      return;
+    }
     const q = data.quotation;
     document.getElementById('quote-number').value = q.quote_number;
     document.getElementById('quote-date').value = q.date;

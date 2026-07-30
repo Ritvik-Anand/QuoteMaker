@@ -48,6 +48,23 @@ function closeMobileMenu() {
   document.body.classList.remove('drawer-open');
 }
 
+// Share a quotation: any logged-in teammate who opens the link lands
+// straight on it (auth's `next` redirect handles anyone not yet signed in).
+async function shareQuote(id) {
+  if (!id) return;
+  const url = `${window.location.origin}/quotation/${id}/edit`;
+  try {
+    await navigator.clipboard.writeText(url);
+    showToast('Link copied — any Slate team member can open it');
+  } catch (e) {
+    try {
+      prompt('Copy this link:', url);
+    } catch (e2) {
+      alert('Share link:\n' + url);
+    }
+  }
+}
+
 // Toast
 function showToast(msg) {
   let t = document.getElementById('toast');

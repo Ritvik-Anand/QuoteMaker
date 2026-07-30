@@ -57,7 +57,7 @@ def _next_quote_number():
 @app.route("/login", methods=["GET"])
 def login_page():
     if session.get("user_id"):
-        return redirect(url_for("index"))
+        return redirect(request.args.get("next") or url_for("index"))
     return render_template("login.html")
 
 
