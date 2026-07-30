@@ -9,26 +9,29 @@
 <div class="card">
   <div class="toolbar">
     <input type="text" id="search-quotes" class="input" placeholder="Search by client, quote number, or tag…" oninput="filterQuotes()" />
-    <select id="filter-user" class="input" style="max-width:220px" onchange="filterQuotes()">
+    <select id="filter-user" class="input filter-user-select" onchange="filterQuotes()">
       <option value="">Everyone on the team</option>
     </select>
   </div>
-  <table class="data-table" id="quotes-table">
-    <thead>
-      <tr>
-        <th>Quote No.</th>
-        <th>Client</th>
-        <th>Date</th>
-        <th>Items</th>
-        <th>Tags <span class="opt">(internal only)</span></th>
-        <th>Last worked on by</th>
-        <th>Actions</th>
-      </tr>
-    </thead>
-    <tbody id="quotes-tbody">
-      <tr><td colspan="7" class="empty-state">Loading…</td></tr>
-    </tbody>
-  </table>
+  <div class="table-wrap history-table-wrap">
+    <table class="data-table" id="quotes-table">
+      <thead>
+        <tr>
+          <th>Quote No.</th>
+          <th>Client</th>
+          <th>Date</th>
+          <th>Items</th>
+          <th>Tags</th>
+          <th>Last worked on by</th>
+          <th>Actions</th>
+        </tr>
+      </thead>
+      <tbody id="quotes-tbody">
+        <tr><td colspan="7" class="empty-state">Loading…</td></tr>
+      </tbody>
+    </table>
+  </div>
+  <div class="history-cards" id="history-cards"></div>
 </div>
 {% endblock %}
 {% block scripts %}
@@ -67,12 +70,31 @@ function filterQuotes() {
   ));
 }
 
+function rowMenuHtml(q) {
+  return `
+    <div class="row-menu-wrap">
+      <button class="row-menu-btn" onclick="toggleRowMenu(this)" aria-label="More actions">⋮</button>
+      <div class="row-menu hidden">
+        <a href="/quotation/${q.id}/edit" class="row-menu-item">✏️ Edit</a>
+        <button class="row-menu-item" onclick="copyShareLink(${q.id})">📋 Copy Link</button>
+        <button class="row-menu-item" onclick="shareViaWhatsApp(${q.id}, '${esc(jsAttr(q.client_name))}')">💬 Send via WhatsApp</button>
+        <a href="/api/quotations/${q.id}/export/pdf" class="row-menu-item" target="_blank">⬇ Download PDF</a>
+        <a href="/api/quotations/${q.id}/export/excel" class="row-menu-item">⬇ Download Excel</a>
+        <button class="row-menu-item danger" onclick="deleteQuote(${q.id})">🗑 Delete</button>
+      </div>
+    </div>
+  `;
+}
+
 function renderQuotes(quotes) {
   const tbody = document.getElementById('quotes-tbody');
+  const cards = document.getElementById('history-cards');
   if (!quotes.length) {
     tbody.innerHTML = '<tr><td colspan="7" class="empty-state">No quotations found</td></tr>';
+    cards.innerHTML = '<div class="empty-state">No quotations found</div>';
     return;
   }
+
   tbody.innerHTML = quotes.map(q => {
     const worker = q.updated_by || q.created_by || 'Unknown';
     const isEdit = q.updated_by && q.updated_by !== q.created_by;
@@ -90,23 +112,59 @@ function renderQuotes(quotes) {
           ${isEdit ? '<span class="dot"></span><span>edited</span>' : ''}
         </div>
       </td>
-      <td class="actions-cell">
-        <a href="/quotation/${q.id}/edit" class="btn btn-sm">Edit</a>
-        <div class="share-wrap">
-          <button class="btn btn-sm" onclick="toggleShareMenu(this)">🔗 Share</button>
-          <div class="share-menu hidden">
-            <button class="share-menu-item" onclick="copyShareLink(${q.id})">📋 Copy Link</button>
-            <button class="share-menu-item" onclick="shareViaWhatsApp(${q.id}, '${esc(jsAttr(q.client_name))}')">💬 Send via WhatsApp</button>
-          </div>
-        </div>
-        <a href="/api/quotations/${q.id}/export/pdf" class="btn btn-sm" target="_blank">PDF</a>
-        <a href="/api/quotations/${q.id}/export/excel" class="btn btn-sm">Excel</a>
-        <button class="btn btn-sm btn-danger" onclick="deleteQuote(${q.id})">Delete</button>
-      </td>
+      <td class="actions-cell">${rowMenuHtml(q)}</td>
     </tr>
   `;
   }).join('');
+
+  cards.innerHTML = quotes.map(q => {
+    const worker = q.updated_by || q.created_by || 'Unknown';
+    const isEdit = q.updated_by && q.updated_by !== q.created_by;
+    const tags = (q.tags || '').split(',').map(t => t.trim()).filter(Boolean);
+    return `
+    <div class="history-card">
+      <div class="history-card-top">
+        <div>
+          <div class="quote-num">${esc(q.quote_number)}</div>
+          <div class="quote-client">${esc(q.client_name)}</div>
+        </div>
+        ${rowMenuHtml(q)}
+      </div>
+      ${tags.length ? `<div class="history-card-tags">${tags.map(t => `<span class="badge tag-badge">${esc(t)}</span>`).join(' ')}</div>` : ''}
+      <div class="history-card-footer">
+        <div class="attribution">
+          <span class="avatar-chip" style="background:${avatarColor(worker)}22;color:${avatarColor(worker)}">${esc(worker[0] || '?').toUpperCase()}</span>
+          <span>${esc(worker)}</span>
+          ${isEdit ? '<span class="dot"></span><span>edited</span>' : ''}
+        </div>
+        <div class="history-card-meta">
+          <span class="badge">${q.item_count} items</span>
+          <span class="quote-date">${esc(q.date)}</span>
+        </div>
+      </div>
+    </div>
+  `;
+  }).join('');
 }
+
+function closeAllRowMenus() {
+  document.querySelectorAll('.row-menu').forEach(m => m.classList.add('hidden'));
+}
+
+function toggleRowMenu(btn) {
+  const menu = btn.nextElementSibling;
+  const wasHidden = menu.classList.contains('hidden');
+  closeAllRowMenus();
+  if (wasHidden) menu.classList.remove('hidden');
+}
+
+document.addEventListener('click', e => {
+  if (!e.target.closest('.row-menu-wrap')) closeAllRowMenus();
+});
+
+document.addEventListener('keydown', e => {
+  if (e.key === 'Escape') closeAllRowMenus();
+});
 
 async function deleteQuote(id) {
   if (!confirm('Delete this quotation?')) return;

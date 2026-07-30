@@ -103,8 +103,9 @@
           </thead>
           <tbody id="items-tbody"></tbody>
         </table>
-        <div id="items-empty" class="empty-state">Search and add items above, or click "+ Manual" for a custom line.</div>
       </div>
+      <div class="items-cards" id="items-cards"></div>
+      <div id="items-empty" class="empty-state">Search and add items above, or click "+ Manual" for a custom line.</div>
     </div>
   </div>
 
@@ -338,9 +339,10 @@ function removeItem(idx) {
 }
 
 function computeFinalPrice(base, adjType, adjVal) {
-  if (adjType === 'markup') return base * (1 + adjVal / 100);
-  if (adjType === 'discount') return base * (1 - adjVal / 100);
-  return base;
+  let price = base;
+  if (adjType === 'markup') price = base * (1 + adjVal / 100);
+  else if (adjType === 'discount') price = base * (1 - adjVal / 100);
+  return Math.round(price * 100) / 100;
 }
 
 function onItemChange(idx, field, value) {
@@ -351,11 +353,16 @@ function onItemChange(idx, field, value) {
   else if (field === 'adjustment_value') { item.adjustment_value = parseFloat(value) || 0; }
   else item[field] = value;
   item.final_price = computeFinalPrice(item.base_price, item.adjustment_type, item.adjustment_value);
-  // update final price cell without full re-render
+  // update final price cell without full re-render (desktop row + mobile card)
   const row = document.getElementById(`item-row-${idx}`);
   if (row) {
     row.querySelector('.final-price-cell').value = item.final_price;
     row.querySelector('.amount-cell').textContent = fmt(item.quantity * item.final_price);
+  }
+  const card = document.getElementById(`item-card-${idx}`);
+  if (card) {
+    card.querySelector('.final-price-cell').value = item.final_price;
+    card.querySelector('.item-card-amount').textContent = '₹ ' + fmt(item.quantity * item.final_price);
   }
   updateTotals();
 }
@@ -445,6 +452,93 @@ function renderItems() {
   });
 
   attachDragHandlers();
+  renderItemCards();
+}
+
+function renderItemCards() {
+  const wrap = document.getElementById('items-cards');
+  const last = quoteItems.length - 1;
+  wrap.innerHTML = quoteItems.map((item, idx) => cardTemplate(item, idx, last)).join('');
+
+  wrap.querySelectorAll('.adj-type-mobile').forEach(sel => {
+    sel.addEventListener('change', () => {
+      const inp = sel.closest('.item-card-adj').querySelector('input');
+      inp.disabled = sel.value === 'none';
+      if (sel.value === 'none') inp.value = '';
+    });
+  });
+}
+
+function cardTemplate(item, idx, last) {
+  return `
+    <div class="item-card" id="item-card-${idx}">
+      <div class="item-card-top">
+        <div class="item-card-desc">
+          <input class="input desc-input" value="${esc(item.description)}"
+            placeholder="Description"
+            onchange="onItemChange(${idx},'description',this.value)" />
+          <input class="input" value="${esc(item.code||'')}"
+            placeholder="Code"
+            onchange="onItemChange(${idx},'code',this.value)" />
+          ${item.supplier_name ? `<div class="item-make-tag">${esc(item.supplier_name)}</div>` : ''}
+        </div>
+        <button class="btn-icon danger" onclick="removeItem(${idx})">✕</button>
+      </div>
+      <div class="item-card-grid cols-3">
+        <div class="form-group">
+          <label>Unit</label>
+          <input class="input" value="${esc(item.unit||'Nos')}" onchange="onItemChange(${idx},'unit',this.value)" />
+        </div>
+        <div class="form-group">
+          <label>Qty</label>
+          <input class="input" type="number" min="0" step="any" value="${item.quantity}" oninput="onItemChange(${idx},'quantity',this.value)" />
+        </div>
+        <div class="form-group">
+          <label>Base ₹</label>
+          <input class="input" type="number" min="0" step="0.01" value="${item.base_price}" oninput="onItemChange(${idx},'base_price',this.value)" />
+        </div>
+      </div>
+      <div class="item-card-adj">
+        <div class="form-group">
+          <label>Adjustment</label>
+          <select class="input adj-type-mobile" onchange="onItemChange(${idx},'adjustment_type',this.value)">
+            <option value="none" ${item.adjustment_type==='none'?'selected':''}>None</option>
+            <option value="markup" ${item.adjustment_type==='markup'?'selected':''}>+% Markup</option>
+            <option value="discount" ${item.adjustment_type==='discount'?'selected':''}>-% Discount</option>
+          </select>
+        </div>
+        <div class="form-group">
+          <label>%</label>
+          <input class="input" type="number" min="0" max="100" step="0.5"
+            value="${item.adjustment_value || ''}" placeholder="%"
+            oninput="onItemChange(${idx},'adjustment_value',this.value)"
+            ${item.adjustment_type==='none'?'disabled':''} />
+        </div>
+      </div>
+      <div class="item-card-grid">
+        <div class="form-group">
+          <label>Final ₹</label>
+          <input class="input final-price-cell" type="number" min="0" step="0.01" value="${item.final_price}" onchange="onFinalPriceChange(${idx},this.value)" />
+        </div>
+        <div class="form-group">
+          <label>Amount</label>
+          <div class="item-card-amount">₹ ${fmt(item.quantity * item.final_price)}</div>
+        </div>
+      </div>
+      <div class="item-card-reorder">
+        <button class="btn btn-sm" onclick="moveItem(${idx},-1)" ${idx===0?'disabled':''}>▲ Move up</button>
+        <button class="btn btn-sm" onclick="moveItem(${idx},1)" ${idx===last?'disabled':''}>▼ Move down</button>
+      </div>
+    </div>
+  `;
+}
+
+function moveItem(idx, dir) {
+  const target = idx + dir;
+  if (target < 0 || target >= quoteItems.length) return;
+  [quoteItems[idx], quoteItems[target]] = [quoteItems[target], quoteItems[idx]];
+  renderItems();
+  updateTotals();
 }
 
 // ── Drag-to-reorder ──────────────────────────────────────────────────────────

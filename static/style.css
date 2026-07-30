@@ -193,6 +193,7 @@ textarea.input { resize: vertical; }
 /* ── Section row ── */
 .section-row { display: flex; gap: 16px; align-items: flex-start; }
 .flex-1 { flex: 1; }
+.quick-actions-card { width: 300px; flex-shrink: 0; }
 
 /* ── Quote rows (dashboard) ── */
 .quote-row { display: flex; align-items: center; justify-content: space-between; padding: 13px 4px; border-bottom: 1px solid var(--border-soft); transition: background .12s; gap: 12px; }
@@ -254,6 +255,7 @@ textarea.input { resize: vertical; }
 
 /* ── Toolbar ── */
 .toolbar { display: flex; gap: 10px; margin-bottom: 14px; }
+.filter-user-select { max-width: 220px; }
 
 /* ── Empty state ── */
 .empty-state { text-align: center; color: var(--text-muted); padding: 40px 20px; font-size: 13px; }
@@ -336,6 +338,23 @@ textarea.input { resize: vertical; }
 #items-tbody tr.dragging { opacity: .4; }
 #items-tbody tr.drag-over { box-shadow: inset 0 2px 0 var(--accent); }
 
+/* ── Items: mobile card list (native drag doesn't work via touch, so these
+   get tap-to-reorder buttons instead of the desktop drag handle) ── */
+.items-cards { display: none; }
+.item-card { border: 1px solid var(--border-soft); border-radius: var(--radius); padding: 14px; margin-bottom: 12px; }
+.item-card:last-child { margin-bottom: 0; }
+.item-card-top { display: flex; align-items: flex-start; gap: 10px; margin-bottom: 12px; }
+.item-card-desc { flex: 1; min-width: 0; }
+.item-card-desc .input { margin-bottom: 6px; }
+.item-card-desc .input:last-child { margin-bottom: 0; }
+.item-card-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin-bottom: 12px; }
+.item-card-grid.cols-3 { grid-template-columns: 1fr 1fr 1fr; }
+.item-card-adj { display: grid; grid-template-columns: 2fr 1fr; gap: 10px; margin-bottom: 12px; }
+.item-card-amount { font-weight: 700; font-size: 15px; color: var(--brand); padding: 9px 0; font-variant-numeric: tabular-nums; }
+.item-card-reorder { display: flex; gap: 8px; padding-top: 10px; border-top: 1px solid var(--border-soft); }
+.item-card-reorder button { flex: 1; }
+.item-card-reorder button:disabled { opacity: .35; cursor: default; }
+
 /* ── User menu ── */
 .nav-user { position: relative; margin-left: 4px; }
 .nav-avatar { width: 34px; height: 34px; border-radius: 50%; background: rgba(255,255,255,.16); border: 1.5px solid rgba(255,255,255,.2); color: #fff; font-weight: 700; font-size: 13px; display: flex; align-items: center; justify-content: center; cursor: pointer; user-select: none; transition: background .15s; }
@@ -363,6 +382,29 @@ textarea.input { resize: vertical; }
 .badge-admin { background: var(--warning-light); color: #92400e; }
 .tag-badge { background: #f3effc; color: #6d3fae; margin: 1px 2px 1px 0; }
 
+/* ── Row overflow menu (⋮) ── */
+.row-menu-wrap { position: relative; display: inline-block; flex-shrink: 0; }
+.row-menu-btn {
+  width: 30px; height: 30px; border-radius: 8px; border: 1px solid var(--border-soft);
+  background: var(--card); color: var(--text-muted); font-size: 16px; font-weight: 700;
+  cursor: pointer; line-height: 1; display: flex; align-items: center; justify-content: center;
+}
+.row-menu-btn:hover { background: var(--bg); }
+.row-menu { position: absolute; right: 0; top: calc(100% + 6px); background: var(--card); border: 1px solid var(--border-soft); border-radius: var(--radius); box-shadow: var(--shadow-lg); min-width: 190px; z-index: 200; overflow: hidden; animation: slideUp .15s var(--ease); }
+.row-menu.hidden { display: none; }
+.row-menu-item { display: block; width: 100%; text-align: left; padding: 10px 15px; font-size: 13px; color: var(--text); background: none; border: none; cursor: pointer; transition: background .12s; font-weight: 500; text-decoration: none; }
+.row-menu-item:hover { background: var(--bg); }
+.row-menu-item.danger { color: var(--danger); border-top: 1px solid var(--border-soft); }
+
+/* ── History: mobile card list (hidden on desktop; table hidden on mobile) ── */
+.history-cards { display: none; }
+.history-card { padding: 14px 4px; border-bottom: 1px solid var(--border-soft); }
+.history-card:last-child { border-bottom: none; }
+.history-card-top { display: flex; align-items: flex-start; justify-content: space-between; gap: 10px; }
+.history-card-tags { margin-top: 6px; }
+.history-card-footer { display: flex; align-items: center; justify-content: space-between; gap: 10px; margin-top: 8px; }
+.history-card-meta { display: flex; align-items: center; gap: 8px; flex-shrink: 0; }
+
 /* ── Checkbox label ── */
 .checkbox-label { display: flex; align-items: center; gap: 9px; font-size: 13px; cursor: pointer; font-weight: 500; }
 .checkbox-label input { width: 16px; height: 16px; cursor: pointer; accent-color: var(--accent); }
@@ -388,10 +430,33 @@ html, body { max-width: 100%; overflow-x: hidden; }
   .form-grid { grid-template-columns: 1fr; }
   .stats-grid { grid-template-columns: 1fr; }
   .section-row { flex-direction: column; }
+  .quick-actions-card { width: 100%; }
   .nav-sub { display: none; }
   .main { padding: 20px 14px 40px; }
   .card-header { flex-wrap: wrap; gap: 10px; }
   .global-adj { flex-wrap: wrap; width: 100%; }
+
+  /* History: swap the desktop table for a stacked card list. */
+  .toolbar { flex-direction: column; }
+  .filter-user-select { max-width: none; }
+  .history-table-wrap { display: none; }
+  .history-cards { display: block; }
+
+  /* Any input under 16px makes iOS Safari auto-zoom the whole page on
+     focus, which is what made the date field (and everything else) look
+     cut off / misaligned — it wasn't a layout bug, it was the browser
+     zooming in. 16px is the zoom threshold, so this is the actual fix. */
+  .input, .input-sm, .input-inline { font-size: 16px; }
+
+  /* Items: swap the desktop table for a stacked card list — a 9-column
+     table has no honest mobile layout, so each item becomes a labeled
+     card instead. Native HTML5 drag doesn't fire from touch, so cards get
+     tap-to-reorder buttons in place of the desktop drag handle. */
+  .item-search-bar { flex-wrap: wrap; }
+  .item-search-bar #item-search { flex: 1 1 100%; }
+  .search-results { width: 100%; max-width: none; }
+  .items-table-wrap { display: none; }
+  .items-cards { display: block; }
 
   /* Navbar: links move into a slide-out hamburger drawer instead of a
      horizontally-scrollable second row. */
