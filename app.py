@@ -329,12 +329,12 @@ def upload_catalog_blob(sid):
         return jsonify({"error": "Supplier not found"}), 404
 
     data = request.get_json(force=True) or {}
-    blob_url = data.get("blob_url", "").strip()
+    blob_url = str(data.get("blob_url") or "").strip()
     if not blob_url:
         return jsonify({"error": "No file provided"}), 400
 
-    catalog_name = data.get("catalog_name", "").strip() or "Catalog"
-    catalog_id = data.get("catalog_id", "").strip()
+    catalog_name = str(data.get("catalog_name") or "").strip() or "Catalog"
+    catalog_id = str(data.get("catalog_id") or "").strip()
 
     try:
         r = requests.get(blob_url, timeout=60)
