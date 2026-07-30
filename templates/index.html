@@ -68,7 +68,7 @@ async function loadDashboard() {
     el.innerHTML = '<div class="empty-state">No quotations yet. <a href="/quotation/new">Create one →</a></div>';
     return;
   }
-  el.innerHTML = quotes.slice(0, 8).map(q => {
+  el.innerHTML = quotes.slice(0, 5).map(q => {
     const total = q.subtotal * (1 + (q.gst_rate || 0) / 100);
     const tags = (q.tags || '').split(',').map(t => t.trim()).filter(Boolean);
     const worker = q.updated_by || q.created_by;

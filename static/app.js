@@ -50,9 +50,13 @@ function closeMobileMenu() {
 
 // Share a quotation: any logged-in teammate who opens the link lands
 // straight on it (auth's `next` redirect handles anyone not yet signed in).
+function shareLinkFor(id) {
+  return `${window.location.origin}/quotation/${id}/edit`;
+}
+
 async function shareQuote(id) {
   if (!id) return;
-  const url = `${window.location.origin}/quotation/${id}/edit`;
+  const url = shareLinkFor(id);
   try {
     await navigator.clipboard.writeText(url);
     showToast('Link copied — any Slate team member can open it');
@@ -63,6 +67,12 @@ async function shareQuote(id) {
       alert('Share link:\n' + url);
     }
   }
+}
+
+function shareQuoteWhatsApp(id) {
+  if (!id) return;
+  const text = `Here's the quotation: ${shareLinkFor(id)}`;
+  window.open(`https://wa.me/?text=${encodeURIComponent(text)}`, '_blank');
 }
 
 // Toast

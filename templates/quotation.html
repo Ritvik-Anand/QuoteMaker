@@ -9,6 +9,7 @@
   <div class="header-actions">
     <button class="btn btn-outline" onclick="saveQuotation()">💾 Save</button>
     <button class="btn btn-outline" id="btn-share" style="display:none" onclick="shareQuote(QID)">🔗 Share</button>
+    <button class="btn btn-outline" id="btn-share-whatsapp" style="display:none" onclick="shareQuoteWhatsApp(QID)" title="Share via WhatsApp">💬</button>
     <button class="btn btn-outline" id="btn-export-pdf" style="display:none" onclick="exportQuote('pdf')">⬇ PDF</button>
     <button class="btn btn-outline" id="btn-export-excel" style="display:none" onclick="exportQuote('excel')">⬇ Excel</button>
   </div>
@@ -144,6 +145,7 @@ async function init() {
   if (QID) {
     document.getElementById('page-title').textContent = 'Edit Quotation';
     document.getElementById('btn-share').style.display = '';
+    document.getElementById('btn-share-whatsapp').style.display = '';
     document.getElementById('btn-export-pdf').style.display = '';
     document.getElementById('btn-export-excel').style.display = '';
     document.getElementById('export-btns').style.display = '';
@@ -427,6 +429,43 @@ function renderItems() {
       const inp = sel.nextElementSibling;
       inp.disabled = sel.value === 'none';
       if (sel.value === 'none') { inp.value = ''; }
+    });
+  });
+
+  attachDragHandlers();
+}
+
+// ── Drag-to-reorder ──────────────────────────────────────────────────────────
+let dragSrcIdx = null;
+
+function attachDragHandlers() {
+  document.querySelectorAll('#items-tbody tr').forEach((row, idx) => {
+    const handle = row.querySelector('.drag-handle');
+    handle.addEventListener('mousedown', () => { row.draggable = true; });
+    handle.addEventListener('touchstart', () => { row.draggable = true; });
+    row.addEventListener('dragstart', (e) => {
+      dragSrcIdx = idx;
+      row.classList.add('dragging');
+      e.dataTransfer.effectAllowed = 'move';
+    });
+    row.addEventListener('dragend', () => {
+      document.querySelectorAll('#items-tbody tr').forEach(r => { r.classList.remove('dragging', 'drag-over'); r.draggable = false; });
+      dragSrcIdx = null;
+    });
+    row.addEventListener('dragover', (e) => {
+      e.preventDefault();
+      if (dragSrcIdx !== null && dragSrcIdx !== idx) row.classList.add('drag-over');
+    });
+    row.addEventListener('dragleave', () => row.classList.remove('drag-over'));
+    row.addEventListener('drop', (e) => {
+      e.preventDefault();
+      row.classList.remove('drag-over');
+      if (dragSrcIdx === null || dragSrcIdx === idx) return;
+      const [moved] = quoteItems.splice(dragSrcIdx, 1);
+      quoteItems.splice(idx, 0, moved);
+      dragSrcIdx = null;
+      renderItems();
+      updateTotals();
     });
   });
 }

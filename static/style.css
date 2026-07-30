@@ -331,6 +331,9 @@ textarea.input { resize: vertical; }
 
 /* ── Drag handle ── */
 .drag-handle { color: #d1d5db; cursor: grab; user-select: none; font-size: 14px; padding: 0 4px; }
+.drag-handle:active { cursor: grabbing; }
+#items-tbody tr.dragging { opacity: .4; }
+#items-tbody tr.drag-over { box-shadow: inset 0 2px 0 var(--accent); }
 
 /* ── User menu ── */
 .nav-user { position: relative; margin-left: 4px; }
