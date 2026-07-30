@@ -1,7 +1,9 @@
 import os
 import json
+import re
 import secrets
 import requests
+import difflib
 from datetime import date
 from pathlib import Path
 from flask import (
@@ -370,6 +372,29 @@ def delete_catalog(cid):
 
 # ── Items API ──────────────────────────────────────────────────────────────────
 
+def _normalize_text(s: str) -> str:
+    """Lowercase and strip punctuation/whitespace so 'SQ.MM', 'Sq mm' and
+    'sqmm' all compare equal — catalogs are wildly inconsistent about this."""
+    return re.sub(r"[^a-z0-9]", "", (s or "").lower())
+
+
+def _normalize_sql(col: str) -> str:
+    """SQL equivalent of _normalize_text() for a column/expression, so DB-side
+    filtering stays consistent with how query tokens are normalized in Python."""
+    expr = f"LOWER({col})"
+    for ch in (".", "-", "/", ",", " ", "''", '"', "(", ")"):
+        expr = f"REPLACE({expr}, '{ch}', '')"
+    return expr
+
+
+_ITEM_SELECT = (
+    "SELECT i.id, i.code, i.description, i.unit, i.base_price, i.catalog_id, "
+    "s.id as supplier_id, s.name as supplier_name, c.name as catalog_name "
+    "FROM items i JOIN suppliers s ON s.id = i.supplier_id "
+    "LEFT JOIN catalogs c ON c.id = i.catalog_id "
+)
+
+
 @app.route("/api/items", methods=["GET"])
 @login_required
 def search_items():
@@ -377,29 +402,63 @@ def search_items():
     supplier_id = request.args.get("supplier_id")
     limit = int(request.args.get("limit", 50))
 
-    sql = (
-        "SELECT i.id, i.code, i.description, i.unit, i.base_price, i.catalog_id, "
-        "s.id as supplier_id, s.name as supplier_name, c.name as catalog_name "
-        "FROM items i JOIN suppliers s ON s.id = i.supplier_id "
-        "LEFT JOIN catalogs c ON c.id = i.catalog_id "
-    )
-    params = []
-    where = []
-    if q:
-        # LIKE is case-sensitive on Postgres but not SQLite — LOWER() on both
-        # sides keeps search behavior identical (and case-insensitive) on both.
-        where.append("(LOWER(i.description) LIKE LOWER(?) OR LOWER(i.code) LIKE LOWER(?))")
-        params += [f"%{q}%", f"%{q}%"]
+    supplier_where, supplier_params = [], []
     if supplier_id:
-        where.append("i.supplier_id = ?")
-        params.append(supplier_id)
+        supplier_where.append("i.supplier_id = ?")
+        supplier_params.append(supplier_id)
+
+    # Primary search: every whitespace-separated token must appear somewhere
+    # in the description or code, independent of order, spacing, or
+    # punctuation — "1.5 sqmm fr" now matches "1.50 SQ.MM ... - FR" even
+    # though neither the spacing nor the decimal places line up exactly.
+    tokens = [_normalize_text(t) for t in q.split()]
+    tokens = [t for t in tokens if t]
+
+    where, params = list(supplier_where), list(supplier_params)
+    if tokens:
+        desc_norm, code_norm = _normalize_sql("i.description"), _normalize_sql("i.code")
+        for tok in tokens:
+            where.append(f"({desc_norm} LIKE ? OR {code_norm} LIKE ?)")
+            params += [f"%{tok}%", f"%{tok}%"]
+
+    sql = _ITEM_SELECT
     if where:
         sql += "WHERE " + " AND ".join(where) + " "
     sql += "ORDER BY i.description LIMIT ?"
-    params.append(limit)
 
     conn = get_db()
-    rows = conn.execute(sql, params).fetchall()
+    rows = conn.execute(sql, params + [limit]).fetchall()
+
+    # Fallback: the strict token match found nothing, but the query is
+    # substantial enough to be a genuine near-miss (typo, abbreviation,
+    # mis-remembered wording) rather than gibberish — rank a broader
+    # candidate pool by per-token fuzzy similarity instead of leaving the
+    # user at a dead end. Matches word-by-word (not the whole string at
+    # once) so a typo in one word doesn't get diluted by a long, otherwise
+    # exact, description.
+    if not rows and tokens:
+        cand_sql = _ITEM_SELECT
+        if supplier_where:
+            cand_sql += "WHERE " + " AND ".join(supplier_where) + " "
+        cand_sql += "ORDER BY i.description LIMIT 5000"
+        candidates = conn.execute(cand_sql, supplier_params).fetchall()
+
+        scored = []
+        for row in candidates:
+            item = dict(row)
+            target_words = re.findall(r"[a-z0-9]+", f"{item['description']} {item.get('code') or ''}".lower())
+            if not target_words:
+                continue
+            token_scores = [
+                max((difflib.SequenceMatcher(None, tok, w).ratio() for w in target_words), default=0)
+                for tok in tokens
+            ]
+            avg_score = sum(token_scores) / len(token_scores)
+            if avg_score >= 0.72 and min(token_scores) >= 0.5:
+                scored.append((avg_score, item))
+        scored.sort(key=lambda x: -x[0])
+        rows = [item for _, item in scored[:limit]]
+
     conn.close()
     return jsonify(rows)
 

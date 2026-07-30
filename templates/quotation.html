@@ -248,6 +248,12 @@ function extractBadges(desc) {
   const badges = [];
   const size = desc.match(/^([\d.]+)\s*sq\.?\s*mm/i);
   if (size) badges.push({ cls: 'sr-size-badge', text: `${size[1]} sq.mm` });
+  // Voltage class (LT/HT) and exact kV rating — flagged loudly since mixing
+  // these up on a cable quote is a costly, easy-to-miss mistake.
+  const voltClass = desc.match(/\b(LT|HT)\b/);
+  if (voltClass) badges.push({ cls: 'sr-volt-badge', text: voltClass[1] });
+  const kv = desc.match(/(\d+(?:\.\d+)?)\s*kV\b/i);
+  if (kv) badges.push({ cls: 'sr-volt-badge', text: `${kv[1]} kV` });
   const pack = desc.match(/(\d+)\s*m\s*(pack|coil)\b/i);
   if (pack) badges.push({ cls: 'sr-pack-badge', text: `${pack[1]}m ${pack[2][0].toUpperCase()}${pack[2].slice(1).toLowerCase()}` });
   const ways = desc.match(/(\d+)\s*Way\b/i);

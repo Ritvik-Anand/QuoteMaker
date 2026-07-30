@@ -293,6 +293,7 @@ textarea.input { resize: vertical; }
 .sr-size-badge { background: var(--accent-light); color: var(--accent-hover); font-weight: 700; border-radius: 5px; padding: 1px 7px; }
 .sr-pack-badge { background: var(--warning-light); color: var(--warning); font-weight: 700; border-radius: 5px; padding: 1px 7px; }
 .sr-badge { background: var(--bg); color: var(--text-muted); font-weight: 700; border-radius: 5px; padding: 1px 7px; border: 1px solid var(--border-soft); }
+.sr-volt-badge { background: var(--danger-light); color: var(--danger); font-weight: 800; border-radius: 5px; padding: 1px 7px; }
 
 .item-search-bar { position: relative; }
 .search-results { position: absolute; top: 100%; left: 0; margin-top: 6px; }

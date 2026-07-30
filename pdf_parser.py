@@ -247,6 +247,23 @@ table (check every table, including ones further down the page or on later pages
 the same variant name before deciding a size is unique) — don't add it when a size only
 appears once for that variant.
 
+Voltage class / LT vs HT (CRITICAL — this changes the product and the price,
+never guess or drop it):
+Cables are frequently split into completely separate sections or tables by
+voltage class — LT (Low Tension, e.g. 1.1 kV) vs HT (High Tension, e.g. 3.3 kV,
+6.6 kV, 11 kV, 22 kV, 33 kV) — sometimes as an explicit "LT"/"HT" label,
+sometimes only as the kV rating itself, and sometimes only as a heading above
+the table with no column for it at all (apply the same heading-inheritance
+rule as the variant sections above: every row below that heading belongs to
+that voltage class until the next heading changes it). Always carry the
+voltage class and/or exact kV rating from whatever heading, caption, or
+column it appears in through into every matching item's description — e.g.
+"70 sq. mm HT Single Core Power Cable - 6.6 kV (E)" vs "70 sq. mm HT Single
+Core Power Cable - 11 kV (E)" are different products at different prices and
+must both appear as separate items, never merged, never left ambiguous, and
+never silently dropped because it "looked" implied. If a size/spec appears
+at multiple voltage ratings, every one of them is a separate item.
+
 Rate-per-Mtr vs rate-per-Coil:
 If a variant has BOTH a "rate per coil"/"rate per 100 mtrs" style column AND a
 "rate per mtr" column, use ONLY the per-metre rate as base_price with unit "Mtr"
