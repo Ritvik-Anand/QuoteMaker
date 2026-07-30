@@ -239,16 +239,25 @@ function searchItems() {
   }, 250);
 }
 
-// Pulls the size (sq.mm) and pack length (e.g. "200m Pack") out of a
-// description so they stand out as badges instead of being buried in text —
-// this is what tells two otherwise-similar rows apart at a glance.
-function extractSizePack(desc) {
-  const sizeMatch = desc.match(/^([\d.]+)\s*sq\.?\s*mm/i);
-  const packMatch = desc.match(/(\d+)\s*m\s*(pack|coil)\b/i);
-  return {
-    size: sizeMatch ? `${sizeMatch[1]} sq.mm` : null,
-    pack: packMatch ? `${packMatch[1]}m ${packMatch[2][0].toUpperCase()}${packMatch[2].slice(1).toLowerCase()}` : null,
-  };
+// Pulls the identifying spec out of a description so it stands out as a
+// badge instead of being buried in text — this is what tells two otherwise-
+// similar rows apart at a glance (sq.mm + pack length for wires, No. of
+// Ways / rating / pole / trip sensitivity for MCBs, RCCBs, DBs, etc).
+function extractBadges(desc) {
+  const badges = [];
+  const size = desc.match(/^([\d.]+)\s*sq\.?\s*mm/i);
+  if (size) badges.push({ cls: 'sr-size-badge', text: `${size[1]} sq.mm` });
+  const pack = desc.match(/(\d+)\s*m\s*(pack|coil)\b/i);
+  if (pack) badges.push({ cls: 'sr-pack-badge', text: `${pack[1]}m ${pack[2][0].toUpperCase()}${pack[2].slice(1).toLowerCase()}` });
+  const ways = desc.match(/(\d+)\s*Way\b/i);
+  if (ways) badges.push({ cls: 'sr-badge', text: `${ways[1]} Way` });
+  const pole = desc.match(/\b(VTPN|TPN|SPN|DP|TP|SP|FP)\b/);
+  if (pole) badges.push({ cls: 'sr-badge', text: pole[1] });
+  const rating = desc.match(/(\d+)\s*A(?:\s*-\s*(\d+)\s*A)?\b/);
+  if (rating) badges.push({ cls: 'sr-badge', text: rating[2] ? `${rating[1]}-${rating[2]}A` : `${rating[1]}A` });
+  const sensitivity = desc.match(/(\d+)\s*mA\b/i);
+  if (sensitivity) badges.push({ cls: 'sr-badge', text: `${sensitivity[1]}mA` });
+  return badges;
 }
 
 function showResults(items) {
@@ -259,15 +268,14 @@ function showResults(items) {
     return;
   }
   el.innerHTML = items.map(i => {
-    const { size, pack } = extractSizePack(i.description);
+    const badges = extractBadges(i.description);
     return `
     <div class="sr-item" onclick="addItem(${JSON.stringify(i).replace(/"/g,'&quot;')})">
       <div class="sr-desc">${i.description}</div>
       <div class="sr-meta">
         <span class="sr-supplier">${i.supplier_name}</span>
         ${i.code ? `<span class="sr-code">${i.code}</span>` : ''}
-        ${size ? `<span class="sr-size-badge">${size}</span>` : ''}
-        ${pack ? `<span class="sr-pack-badge">${pack}</span>` : ''}
+        ${badges.map(b => `<span class="${b.cls}">${b.text}</span>`).join('')}
         <span class="sr-price">₹ ${i.base_price.toLocaleString('en-IN', {minimumFractionDigits:2})}</span>
       </div>
     </div>
