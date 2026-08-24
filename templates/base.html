@@ -28,6 +28,7 @@
         <a href="/" class="nav-link {% if request.path == '/' %}active{% endif %}">Dashboard</a>
         <a href="/catalogs" class="nav-link {% if request.path == '/catalogs' %}active{% endif %}">Catalogs</a>
         <a href="/history" class="nav-link {% if request.path == '/history' %}active{% endif %}">History</a>
+        <a href="/projects" class="nav-link {% if request.path.startswith('/projects') %}active{% endif %}">Projects</a>
         {% if session.is_admin or session.role == 'ops' %}
         <a href="/attendance" class="nav-link {% if request.path == '/attendance' %}active{% endif %}">Attendance</a>
         <a href="/payroll" class="nav-link {% if request.path == '/payroll' %}active{% endif %}">Payroll</a>
@@ -60,6 +61,7 @@
       <a href="/" class="mobile-drawer-link {% if request.path == '/' %}active{% endif %}">Dashboard</a>
       <a href="/catalogs" class="mobile-drawer-link {% if request.path == '/catalogs' %}active{% endif %}">Catalogs</a>
       <a href="/history" class="mobile-drawer-link {% if request.path == '/history' %}active{% endif %}">History</a>
+      <a href="/projects" class="mobile-drawer-link {% if request.path.startswith('/projects') %}active{% endif %}">Projects</a>
       {% if session.is_admin or session.role == 'ops' %}
       <a href="/attendance" class="mobile-drawer-link {% if request.path == '/attendance' %}active{% endif %}">Attendance</a>
       <a href="/payroll" class="mobile-drawer-link {% if request.path == '/payroll' %}active{% endif %}">Payroll</a>

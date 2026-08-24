@@ -178,6 +178,45 @@ CREATE TABLE IF NOT EXISTS payroll (
     paid_at        TIMESTAMP,
     UNIQUE(employee_id, year, month)
 );
+CREATE TABLE IF NOT EXISTS projects (
+    id           INTEGER PRIMARY KEY AUTOINCREMENT,
+    name         TEXT NOT NULL,
+    client_name  TEXT DEFAULT '',
+    notes        TEXT DEFAULT '',
+    quotation_id INTEGER REFERENCES quotations(id) ON DELETE SET NULL,
+    created_by   TEXT DEFAULT '',
+    created_at   TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    updated_at   TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+CREATE TABLE IF NOT EXISTS project_items (
+    id                 INTEGER PRIMARY KEY AUTOINCREMENT,
+    project_id         INTEGER NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+    description        TEXT NOT NULL,
+    unit               TEXT DEFAULT 'Nos',
+    quantity           REAL NOT NULL DEFAULT 1,
+    sale_adj_type      TEXT DEFAULT 'none',
+    sale_adj_value     REAL DEFAULT 0,
+    -- No FK constraint here on purpose: this points at a row in
+    -- project_item_options, which itself points back at this table, so a
+    -- formal circular reference would fight table-creation order for no
+    -- real benefit — validated in application code instead.
+    selected_option_id INTEGER,
+    sort_order         INTEGER DEFAULT 0
+);
+CREATE TABLE IF NOT EXISTS project_item_options (
+    id                 INTEGER PRIMARY KEY AUTOINCREMENT,
+    project_item_id    INTEGER NOT NULL REFERENCES project_items(id) ON DELETE CASCADE,
+    supplier_id        INTEGER REFERENCES suppliers(id) ON DELETE SET NULL,
+    supplier_name      TEXT DEFAULT '',
+    item_id            INTEGER REFERENCES items(id) ON DELETE SET NULL,
+    code               TEXT DEFAULT '',
+    description        TEXT NOT NULL,
+    unit               TEXT DEFAULT 'Nos',
+    list_price         REAL NOT NULL DEFAULT 0,
+    purchase_adj_type  TEXT DEFAULT 'discount',
+    purchase_adj_value REAL DEFAULT 0,
+    created_at         TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
 """
 
 _PG_TABLES = [
@@ -273,6 +312,41 @@ _PG_TABLES = [
         paid_by        TEXT DEFAULT '',
         paid_at        TIMESTAMP,
         UNIQUE(employee_id, year, month)
+    )""",
+    """CREATE TABLE IF NOT EXISTS projects (
+        id           SERIAL PRIMARY KEY,
+        name         TEXT NOT NULL,
+        client_name  TEXT DEFAULT '',
+        notes        TEXT DEFAULT '',
+        quotation_id INTEGER REFERENCES quotations(id) ON DELETE SET NULL,
+        created_by   TEXT DEFAULT '',
+        created_at   TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        updated_at   TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+    )""",
+    """CREATE TABLE IF NOT EXISTS project_items (
+        id                 SERIAL PRIMARY KEY,
+        project_id         INTEGER NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+        description        TEXT NOT NULL,
+        unit               TEXT DEFAULT 'Nos',
+        quantity           REAL NOT NULL DEFAULT 1,
+        sale_adj_type      TEXT DEFAULT 'none',
+        sale_adj_value     REAL DEFAULT 0,
+        selected_option_id INTEGER,
+        sort_order         INTEGER DEFAULT 0
+    )""",
+    """CREATE TABLE IF NOT EXISTS project_item_options (
+        id                 SERIAL PRIMARY KEY,
+        project_item_id    INTEGER NOT NULL REFERENCES project_items(id) ON DELETE CASCADE,
+        supplier_id        INTEGER REFERENCES suppliers(id) ON DELETE SET NULL,
+        supplier_name      TEXT DEFAULT '',
+        item_id            INTEGER REFERENCES items(id) ON DELETE SET NULL,
+        code               TEXT DEFAULT '',
+        description        TEXT NOT NULL,
+        unit               TEXT DEFAULT 'Nos',
+        list_price         REAL NOT NULL DEFAULT 0,
+        purchase_adj_type  TEXT DEFAULT 'discount',
+        purchase_adj_value REAL DEFAULT 0,
+        created_at         TIMESTAMP DEFAULT CURRENT_TIMESTAMP
     )""",
 ]
 

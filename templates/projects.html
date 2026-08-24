@@ -1,0 +1,56 @@
+{% extends "base.html" %}
+{% block title %}Projects{% endblock %}
+{% block content %}
+<div class="page-header">
+  <h1>Projects</h1>
+  <a href="/projects/new" class="btn btn-primary">+ New Project</a>
+</div>
+
+<div class="card">
+  <div class="table-wrap">
+  <table class="data-table">
+    <thead>
+      <tr><th>Project</th><th>Client</th><th>Items</th><th>Quotation</th><th>Updated</th><th>Actions</th></tr>
+    </thead>
+    <tbody id="proj-tbody">
+      <tr><td colspan="6" class="empty-state">Loading…</td></tr>
+    </tbody>
+  </table>
+  </div>
+</div>
+{% endblock %}
+{% block scripts %}
+<script>
+async function loadProjects() {
+  const projects = await fetch('/api/projects').then(r => r.json());
+  const tbody = document.getElementById('proj-tbody');
+  if (!projects.length) {
+    tbody.innerHTML = '<tr><td colspan="6" class="empty-state">No projects yet — start one to compare makes and cost out a job.</td></tr>';
+    return;
+  }
+  tbody.innerHTML = projects.map(p => `
+    <tr>
+      <td><a href="/projects/${p.id}/edit" class="link-sm"><strong>${esc(p.name)}</strong></a></td>
+      <td>${esc(p.client_name) || '<span style="color:var(--text-faint)">—</span>'}</td>
+      <td><span class="badge">${p.item_count} item${p.item_count === 1 ? '' : 's'}</span></td>
+      <td>${p.quotation_id ? `<a href="/quotation/${p.quotation_id}/edit" class="link-sm">View quote →</a>` : '<span style="color:var(--text-faint)">Not generated</span>'}</td>
+      <td style="color:var(--text-muted);font-size:12px">${(p.updated_at || '').substring(0,10)}</td>
+      <td class="actions-cell">
+        <a href="/projects/${p.id}/edit" class="btn btn-sm">Open</a>
+        <button class="btn btn-sm btn-danger" onclick="deleteProject(${p.id}, '${esc(jsAttr(p.name))}')">Delete</button>
+      </td>
+    </tr>
+  `).join('');
+}
+
+async function deleteProject(id, name) {
+  if (!confirm(`Delete project "${name}"? This does not delete any quotation already generated from it.`)) return;
+  await fetch(`/api/projects/${id}`, {method: 'DELETE'});
+  loadProjects();
+}
+
+function esc(s) { return String(s||'').replace(/&/g,'&amp;').replace(/"/g,'&quot;').replace(/</g,'&lt;'); }
+function jsAttr(s) { return String(s||'').replace(/\\/g,'\\\\').replace(/'/g,"\\'").replace(/\n/g,' '); }
+loadProjects();
+</script>
+{% endblock %}

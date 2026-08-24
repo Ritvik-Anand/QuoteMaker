@@ -222,6 +222,24 @@ def history_page():
     return render_template("history.html")
 
 
+@app.route("/projects")
+@login_required
+def projects_page():
+    return render_template("projects.html")
+
+
+@app.route("/projects/new")
+@login_required
+def new_project_page():
+    return render_template("project_edit.html")
+
+
+@app.route("/projects/<int:pid>/edit")
+@login_required
+def edit_project_page(pid):
+    return render_template("project_edit.html", pid=pid)
+
+
 @app.route("/attendance")
 @marker_required
 def attendance_page():
@@ -1090,6 +1108,193 @@ def mark_payroll_paid(pid):
     conn.commit()
     conn.close()
     return jsonify({"ok": True})
+
+
+# ── Projects API ───────────────────────────────────────────────────────────────
+# A Project is the internal costing workspace where multiple suppliers' makes
+# get compared for the same spec line — purchase discount (what a supplier
+# quotes us) vs. sale discount (what we quote the client) both apply against
+# the same underlying list price, so margin is just sale_rate - purchase_rate.
+# None of this ever touches the quotations/quotation_items tables until
+# "Generate Quotation" is explicitly run, so cost/margin data can never leak
+# onto a client-facing PDF or Excel export by accident.
+
+def _compute_price(base: float, adj_type: str, adj_value: float) -> float:
+    if adj_type == "markup":
+        price = base * (1 + adj_value / 100)
+    elif adj_type == "discount":
+        price = base * (1 - adj_value / 100)
+    else:
+        price = base
+    return round(price, 2)
+
+
+@app.route("/api/projects", methods=["GET"])
+@login_required
+def list_projects():
+    conn = get_db()
+    rows = conn.execute(
+        "SELECT p.*, "
+        "(SELECT COUNT(*) FROM project_items pi WHERE pi.project_id = p.id) as item_count "
+        "FROM projects p ORDER BY p.updated_at DESC"
+    ).fetchall()
+    conn.close()
+    return jsonify(rows)
+
+
+@app.route("/api/projects", methods=["POST"])
+@login_required
+def create_project():
+    data = request.json
+    name = (data.get("name") or "").strip()
+    if not name:
+        return jsonify({"error": "Project name required"}), 400
+    conn = get_db()
+    pid = conn.insert(
+        "INSERT INTO projects (name, client_name, notes, created_by) VALUES (?,?,?,?)",
+        (name, (data.get("client_name") or "").strip(), data.get("notes", ""), session["username"])
+    )
+    conn.commit()
+    conn.close()
+    return jsonify({"id": pid})
+
+
+@app.route("/api/projects/<int:pid>", methods=["GET"])
+@login_required
+def get_project(pid):
+    conn = get_db()
+    project = conn.execute("SELECT * FROM projects WHERE id=?", (pid,)).fetchone()
+    if not project:
+        conn.close()
+        return jsonify({"error": "Not found"}), 404
+    items = conn.execute(
+        "SELECT * FROM project_items WHERE project_id=? ORDER BY sort_order", (pid,)
+    ).fetchall()
+    for item in items:
+        item["options"] = conn.execute(
+            "SELECT * FROM project_item_options WHERE project_item_id=? ORDER BY id", (item["id"],)
+        ).fetchall()
+    conn.close()
+    return jsonify({"project": project, "items": items})
+
+
+@app.route("/api/projects/<int:pid>", methods=["PUT"])
+@login_required
+def save_project(pid):
+    data = request.json
+    name = (data.get("name") or "").strip()
+    if not name:
+        return jsonify({"error": "Project name required"}), 400
+    conn = get_db()
+    if not conn.execute("SELECT id FROM projects WHERE id=?", (pid,)).fetchone():
+        conn.close()
+        return jsonify({"error": "Not found"}), 404
+
+    conn.execute(
+        "UPDATE projects SET name=?, client_name=?, notes=?, updated_at=CURRENT_TIMESTAMP WHERE id=?",
+        (name, (data.get("client_name") or "").strip(), data.get("notes", ""), pid)
+    )
+    # Full replace, same pattern as quotation saves — the whole item/option
+    # tree is small enough that re-inserting it fresh is simpler and safer
+    # than diffing, and ON DELETE CASCADE takes the options with the items.
+    conn.execute("DELETE FROM project_items WHERE project_id=?", (pid,))
+    for idx, item in enumerate(data.get("items", [])):
+        item_id = conn.insert(
+            "INSERT INTO project_items (project_id, description, unit, quantity, "
+            "sale_adj_type, sale_adj_value, sort_order) VALUES (?,?,?,?,?,?,?)",
+            (pid, item["description"], item.get("unit", "Nos"), float(item.get("quantity", 1)),
+             item.get("sale_adj_type", "none"), float(item.get("sale_adj_value", 0)), idx)
+        )
+        option_ids = []
+        for opt in item.get("options", []):
+            oid = conn.insert(
+                "INSERT INTO project_item_options (project_item_id, supplier_id, supplier_name, "
+                "item_id, code, description, unit, list_price, purchase_adj_type, purchase_adj_value) "
+                "VALUES (?,?,?,?,?,?,?,?,?,?)",
+                (item_id, opt.get("supplier_id"), opt.get("supplier_name", ""), opt.get("item_id"),
+                 opt.get("code", ""), opt["description"], opt.get("unit", "Nos"),
+                 float(opt.get("list_price", 0)), opt.get("purchase_adj_type", "discount"),
+                 float(opt.get("purchase_adj_value", 0)))
+            )
+            option_ids.append(oid)
+        sel_idx = item.get("selected_option_index")
+        if sel_idx is not None and 0 <= sel_idx < len(option_ids):
+            conn.execute(
+                "UPDATE project_items SET selected_option_id=? WHERE id=?",
+                (option_ids[sel_idx], item_id)
+            )
+    conn.commit()
+    conn.close()
+    return jsonify({"ok": True})
+
+
+@app.route("/api/projects/<int:pid>", methods=["DELETE"])
+@login_required
+def delete_project(pid):
+    conn = get_db()
+    conn.execute("DELETE FROM projects WHERE id=?", (pid,))
+    conn.commit()
+    conn.close()
+    return jsonify({"ok": True})
+
+
+@app.route("/api/projects/<int:pid>/generate-quotation", methods=["POST"])
+@login_required
+def generate_quotation_from_project(pid):
+    conn = get_db()
+    project = conn.execute("SELECT * FROM projects WHERE id=?", (pid,)).fetchone()
+    if not project:
+        conn.close()
+        return jsonify({"error": "Not found"}), 404
+
+    items = conn.execute(
+        "SELECT * FROM project_items WHERE project_id=? ORDER BY sort_order", (pid,)
+    ).fetchall()
+    if not items:
+        conn.close()
+        return jsonify({"error": "Add at least one item before generating a quotation"}), 400
+
+    resolved = []
+    missing = []
+    for item in items:
+        if not item["selected_option_id"]:
+            missing.append(item["description"])
+            continue
+        opt = conn.execute(
+            "SELECT * FROM project_item_options WHERE id=?", (item["selected_option_id"],)
+        ).fetchone()
+        if not opt:
+            missing.append(item["description"])
+            continue
+        resolved.append((item, opt))
+    if missing:
+        conn.close()
+        return jsonify({
+            "error": "Pick a make for every line before generating a quotation — missing: "
+                     + ", ".join(missing[:5]) + ("…" if len(missing) > 5 else "")
+        }), 400
+
+    qid = conn.insert(
+        "INSERT INTO quotations (quote_number, client_name, date, created_by, updated_by) "
+        "VALUES (?,?,?,?,?)",
+        (_next_quote_number(), project["client_name"] or project["name"], date.today().isoformat(),
+         session["username"], session["username"])
+    )
+    for idx, (item, opt) in enumerate(resolved):
+        final_price = _compute_price(opt["list_price"], item["sale_adj_type"], item["sale_adj_value"])
+        conn.execute(
+            "INSERT INTO quotation_items "
+            "(quotation_id, item_id, description, code, unit, quantity, base_price, "
+            "adjustment_type, adjustment_value, final_price, sort_order, supplier_name) "
+            "VALUES (?,?,?,?,?,?,?,?,?,?,?,?)",
+            (qid, opt["item_id"], opt["description"], opt["code"], item["unit"], item["quantity"],
+             opt["list_price"], item["sale_adj_type"], item["sale_adj_value"], final_price, idx,
+             opt["supplier_name"])
+        )
+    conn.execute("UPDATE projects SET quotation_id=?, updated_at=CURRENT_TIMESTAMP WHERE id=?", (qid, pid))
+    conn.commit()
+    conn.close()
+    return jsonify({"quotation_id": qid})
 
 
 # Runs on import so it also fires under Vercel's serverless WSGI handler
