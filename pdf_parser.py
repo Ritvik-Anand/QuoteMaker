@@ -134,6 +134,52 @@ def _extract_table_grid(page, t) -> list:
 # letters HT/LT.
 _VOLTAGE_RE = re.compile(r"^(HT|LT)\b.*\b(Cables?|Power)\b")
 
+# A whole-number cell (optionally rupee-prefixed) with no decimal point,
+# immediately followed by a cell that's just a two-decimal remainder — the
+# signature of pdfplumber inferring a spurious column boundary through the
+# middle of a price's digits, e.g. "` 1615.00" split into "` 161" + "5.00 20 N".
+_TRUNCATED_PRICE_RE = re.compile(r"^`?\s*\d{1,4}$")
+_PRICE_REMAINDER_RE = re.compile(r"^\d{1,3}\.\d{2}\b")
+
+
+def _table_price_corrupted(rows: list) -> bool:
+    for row in rows:
+        cells = [c for c in row if c is not None]
+        for a, b in zip(cells, cells[1:]):
+            if _TRUNCATED_PRICE_RE.match(a.strip()) and _PRICE_REMAINDER_RE.match(b.strip()):
+                return True
+    return False
+
+
+def _find_tables_safe(page):
+    """
+    pdfplumber's default line-based table detector occasionally infers a
+    vertical column boundary that cuts straight through a price's digits,
+    silently corrupting the value the model sees (see _table_price_corrupted).
+    The stricter detector (real ruling lines only, no inference) fixes this,
+    but isn't safe to use everywhere — some catalogs (e.g. KEI's) have no
+    real ruling lines at all, so the strict detector finds zero tables there
+    and would destroy correct extraction. Only switch to it for a page where
+    the default result is actually corrupted, and only if the strict result
+    recovers the same tables with the corruption gone and no rows lost.
+    """
+    tables = page.find_tables()
+    if not tables:
+        return tables
+    default_rows = [t.extract() for t in tables]
+    if not any(_table_price_corrupted(rows) for rows in default_rows):
+        return tables
+
+    strict = page.find_tables(table_settings={"vertical_strategy": "lines_strict", "horizontal_strategy": "lines"})
+    if len(strict) != len(tables):
+        return tables
+    strict_rows = [t.extract() for t in strict]
+    if any(_table_price_corrupted(rows) for rows in strict_rows):
+        return tables
+    if any(len(sr) < len(dr) for sr, dr in zip(strict_rows, default_rows)):
+        return tables
+    return strict
+
 
 def _extract_page_text(page, voltage_state: list) -> str:
     """
@@ -154,7 +200,7 @@ def _extract_page_text(page, voltage_state: list) -> str:
     wrong voltage class is a very expensive mistake, so it's tagged onto
     every table deterministically here instead of trusted to the model's memory.
     """
-    tables = page.find_tables()
+    tables = _find_tables_safe(page)
     if not tables:
         text = (page.extract_text(x_tolerance=2, y_tolerance=2) or "").strip()
         for line in text.split("\n"):
@@ -246,12 +292,20 @@ extracted directly from the PDF's table structure — each row is one product si
 and each column is labeled by its header in the first line of that table.
 
 Return ONLY a valid JSON array. Each element:
-{{"code":"<item code or empty string>","description":"<full product name>","unit":"<Nos/Mtr/Set/Box/Kg/Pcs etc>","base_price":<number>}}
+{{"code":"<item code or empty string>","description":"<full product name>","unit":"<Nos/Mtr/Set/Box/Kg/Pcs etc>","price":<number>,"pack_length_m":<integer>}}
 
 Rules:
 - Skip headers, footers, section titles, and rows with no price.
 - If price is a range, use the lower value.
-- base_price must be a plain number — no ₹ or commas.
+- "price" must be the number EXACTLY as printed in the source (no ₹, no commas,
+  no division, no other math) — copy it, do not compute it.
+- "pack_length_m": if the price column is explicitly labeled as covering a bulk
+  length ("per 90 m", "per 100 Mtrs", "per 1000 m", "per 500 m", etc.), set this
+  to that EXACT number taken from the header text (90, 100, 1000, 500, ...) — a
+  per-metre rate will be computed for you afterwards by dividing price by this
+  number, so do not divide anything yourself. If the price is already a plain
+  per-unit price (per piece, per set, per kg, a coil/box price with no per-metre
+  breakdown available, etc.), set pack_length_m to 1.
 - No markdown, no explanation, just the JSON array.
 
 Multi-variant tables (IMPORTANT):
@@ -285,7 +339,9 @@ rate for each, but append the pack length so they stay distinguishable, e.g.
 suffix when the same variant+size genuinely repeats across more than one pack-length
 table (check every table, including ones further down the page or on later pages, for
 the same variant name before deciding a size is unique) — don't add it when a size only
-appears once for that variant.
+appears once for that variant. Each such table also has its own pack_length_m (90, 180,
+1000, ...) taken from that table's own header — copy each table's price and
+pack_length_m independently, never assume one table's pack length for another.
 
 Voltage class / LT vs HT (CRITICAL — this changes the product and the price,
 never guess or drop it):
@@ -310,13 +366,24 @@ merged, never left ambiguous, and never silently carried over from a
 different table's class. If a size/spec appears at multiple voltage ratings,
 every one of them is a separate item.
 
-Rate-per-Mtr vs rate-per-Coil:
-If a variant has BOTH a "rate per coil"/"rate per 100 mtrs" style column AND a
-"rate per mtr" column, use ONLY the per-metre rate as base_price with unit "Mtr"
-(ignore the coil/100-mtr rate for that variant). If a table's rates are explicitly
-labeled "per 100 Mtrs" and there is no separate per-Mtr column, divide the value by
-100 to get the per-metre price, and still use unit "Mtr". Only fall back to a
-coil-based unit (e.g. unit "Coil") when no per-metre price can be derived at all.
+Rate-per-Mtr vs rate-per-Coil (CRITICAL — getting pack_length_m wrong quotes a
+real customer 10x or 1000x the correct price; read the exact number printed in
+the header, do not guess or default to a round number out of habit):
+If a variant has BOTH a "rate per coil"/"rate per N mtrs" style column AND a
+separate, already-per-metre "rate per mtr" column, use ONLY the per-metre
+column: set price to that column's value and pack_length_m to 1 (ignore the
+coil/bulk-pack column for that variant entirely).
+
+If a table's price column is instead explicitly labeled as covering a bulk
+length — "per 100 Mtrs", "per 90 m", "per 180 m", "per 1000 m", "per 500 m",
+or any other "per N m/Mtrs" — set price to the value exactly as printed and
+pack_length_m to that EXACT N from the header text. Different tables for the
+same product commonly sit near each other with different N (e.g. a "per 90 m"
+table for small sizes right next to a "per 1000 m" table for large sizes of
+the very same variant) — read each table's own header, never reuse a nearby
+table's N. Set unit to "Mtr" in all of these cases. Only fall back to a
+coil-based unit (e.g. unit "Coil", pack_length_m 1) when no per-metre
+breakdown can be derived at all.
 
 Catalog text:
 {chunk_text}"""
@@ -358,7 +425,19 @@ Catalog text:
     cleaned = []
     for item in items:
         try:
-            price = float(str(item.get("base_price", 0)).replace(",", ""))
+            raw_price = float(str(item.get("price", item.get("base_price", 0))).replace(",", ""))
+            pack_length_m = item.get("pack_length_m", 1)
+            try:
+                pack_length_m = float(str(pack_length_m).replace(",", ""))
+            except (ValueError, TypeError):
+                pack_length_m = 1
+            if pack_length_m <= 0:
+                pack_length_m = 1
+            # The model never divides the price itself — it copies the printed
+            # price and pack length verbatim, and this is the one place the
+            # per-metre rate actually gets computed, so a wrong divisor can
+            # never slip in from an LLM arithmetic mistake.
+            price = raw_price / pack_length_m
             desc = str(item.get("description", "")).strip()
             if desc and price > 0:
                 cleaned.append({
@@ -366,6 +445,7 @@ Catalog text:
                     "description": desc,
                     "unit": str(item.get("unit", "Nos") or "Nos").strip() or "Nos",
                     "base_price": price,
+                    "pack_length_m": pack_length_m,
                 })
         except (ValueError, TypeError):
             continue
@@ -466,10 +546,32 @@ def parse_catalog_pdf(pdf_bytes: bytes, supplier_name: str) -> list[dict]:
         items = _parse_pages_recursive(client, chunk, supplier_name)
         all_items.extend(items)
 
+    # Same variant+size sold at more than one pack length (e.g. a 90m carton
+    # and a 1000m reel) legitimately produces two items with an identical
+    # description but different prices. The model is only ever shown one
+    # chunk of the catalog at a time, so it can't reliably know the other
+    # pack-length table exists elsewhere to add a distinguishing suffix
+    # itself — do it here instead, across the full merged item set, where
+    # every occurrence is actually visible at once.
+    by_desc: dict[str, list[dict]] = {}
+    for item in all_items:
+        by_desc.setdefault(item["description"].lower(), []).append(item)
+    for group in by_desc.values():
+        distinct_prices = {i["base_price"] for i in group}
+        if len(distinct_prices) <= 1:
+            continue
+        for item in group:
+            n = item.get("pack_length_m", 1)
+            if n and n > 1:
+                suffix = f" - {int(n) if n == int(n) else n}m Pack"
+                if suffix.lower() not in item["description"].lower():
+                    item["description"] += suffix
+
     # Deduplicate by (description, base_price) keeping last occurrence
     seen: dict[tuple, dict] = {}
     for item in all_items:
         key = (item["description"].lower(), item["base_price"])
+        item.pop("pack_length_m", None)
         seen[key] = item
 
     return list(seen.values())

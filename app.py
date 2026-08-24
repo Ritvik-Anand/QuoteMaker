@@ -387,6 +387,30 @@ def _normalize_sql(col: str) -> str:
     return expr
 
 
+_NUM_TOKEN_RE = re.compile(r"^\d+(?:\.\d+)?$")
+_NUM_RE = re.compile(r"\d+(?:\.\d+)?")
+
+
+def _is_numeric_token(tok: str) -> bool:
+    return bool(_NUM_TOKEN_RE.match(tok))
+
+
+def _extract_numbers(s: str) -> list:
+    """All standalone numbers appearing in s, e.g. '1.5 sq mm, 150m coil' -> [1.5, 150]."""
+    return [float(n) for n in _NUM_RE.findall(s or "")]
+
+
+def _numbers_match(query_values, target_text) -> bool:
+    """Every numeric token in the query must equal (exactly, not as a substring)
+    one of the numbers in the target text. This stops '1.5' from matching '150'
+    just because '15' happens to be a substring of '150' — a real mismatch that
+    would misquote a completely different cable size."""
+    if not query_values:
+        return True
+    target_nums = _extract_numbers(target_text)
+    return all(any(abs(v - n) < 1e-9 for n in target_nums) for v in query_values)
+
+
 _ITEM_SELECT = (
     "SELECT i.id, i.code, i.description, i.unit, i.base_price, i.catalog_id, "
     "s.id as supplier_id, s.name as supplier_name, c.name as catalog_name "
@@ -409,25 +433,42 @@ def search_items():
 
     # Primary search: every whitespace-separated token must appear somewhere
     # in the description or code, independent of order, spacing, or
-    # punctuation — "1.5 sqmm fr" now matches "1.50 SQ.MM ... - FR" even
-    # though neither the spacing nor the decimal places line up exactly.
-    tokens = [_normalize_text(t) for t in q.split()]
-    tokens = [t for t in tokens if t]
+    # punctuation — "sqmm fr" now matches "SQ.MM ... - FR" even though
+    # neither the spacing nor punctuation lines up exactly.
+    #
+    # Numbers are handled separately from text: a numeric token (e.g. "1.5")
+    # must match a *whole* number in the target, not just a substring of a
+    # longer one — otherwise "1.5 sq mm" would wrongly match "150 sq mm"
+    # because the digits "15" are a plain substring of "150". Getting a
+    # cable size wrong here is exactly the kind of mistake that costs real
+    # money, so numbers get exact-value comparison, not fuzzy substring.
+    raw_tokens = q.split()
+    numeric_values = [float(t) for t in raw_tokens if _is_numeric_token(t)]
+    text_tokens = [_normalize_text(t) for t in raw_tokens if not _is_numeric_token(t)]
+    text_tokens = [t for t in text_tokens if t]
 
     where, params = list(supplier_where), list(supplier_params)
-    if tokens:
+    if text_tokens:
         desc_norm, code_norm = _normalize_sql("i.description"), _normalize_sql("i.code")
-        for tok in tokens:
+        for tok in text_tokens:
             where.append(f"({desc_norm} LIKE ? OR {code_norm} LIKE ?)")
             params += [f"%{tok}%", f"%{tok}%"]
 
     sql = _ITEM_SELECT
     if where:
         sql += "WHERE " + " AND ".join(where) + " "
-    sql += "ORDER BY i.description LIMIT ?"
+    sql += "ORDER BY i.description "
+    # Numeric tokens are checked exactly in Python below, so when any are
+    # present fetch a wider pool before trimming to `limit`.
+    sql += "LIMIT ?"
+    sql_limit = 2000 if numeric_values else limit
 
     conn = get_db()
-    rows = conn.execute(sql, params + [limit]).fetchall()
+    rows = conn.execute(sql, params + [sql_limit]).fetchall()
+
+    if numeric_values:
+        rows = [r for r in rows if _numbers_match(numeric_values, f"{r['description']} {r.get('code') or ''}")]
+    rows = rows[:limit]
 
     # Fallback: the strict token match found nothing, but the query is
     # substantial enough to be a genuine near-miss (typo, abbreviation,
@@ -436,7 +477,7 @@ def search_items():
     # user at a dead end. Matches word-by-word (not the whole string at
     # once) so a typo in one word doesn't get diluted by a long, otherwise
     # exact, description.
-    if not rows and tokens:
+    if not rows and (text_tokens or numeric_values):
         cand_sql = _ITEM_SELECT
         if supplier_where:
             cand_sql += "WHERE " + " AND ".join(supplier_where) + " "
@@ -446,16 +487,27 @@ def search_items():
         scored = []
         for row in candidates:
             item = dict(row)
-            target_words = re.findall(r"[a-z0-9]+", f"{item['description']} {item.get('code') or ''}".lower())
-            if not target_words:
+            target_text = f"{item['description']} {item.get('code') or ''}"
+            # Numbers stay a hard, exact requirement even in the fuzzy
+            # fallback — a typo-tolerant match on a cable size is how "1.5"
+            # ends up quoting "150" by mistake.
+            if not _numbers_match(numeric_values, target_text):
                 continue
-            token_scores = [
-                max((difflib.SequenceMatcher(None, tok, w).ratio() for w in target_words), default=0)
-                for tok in tokens
-            ]
-            avg_score = sum(token_scores) / len(token_scores)
-            if avg_score >= 0.72 and min(token_scores) >= 0.5:
-                scored.append((avg_score, item))
+            if text_tokens:
+                target_words = re.findall(r"[a-z0-9]+", target_text.lower())
+                if not target_words:
+                    continue
+                token_scores = [
+                    max((difflib.SequenceMatcher(None, tok, w).ratio() for w in target_words), default=0)
+                    for tok in text_tokens
+                ]
+                avg_score = sum(token_scores) / len(token_scores)
+                if avg_score >= 0.72 and min(token_scores) >= 0.5:
+                    scored.append((avg_score, item))
+            else:
+                # Numeric-only query that had no exact match at the
+                # strict-search size and did match here exactly.
+                scored.append((1.0, item))
         scored.sort(key=lambda x: -x[0])
         rows = [item for _, item in scored[:limit]]
 
