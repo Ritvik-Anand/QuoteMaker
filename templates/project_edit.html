@@ -49,10 +49,46 @@
 <div class="card">
   <div class="card-header">
     <h2 class="card-title">Spec Lines</h2>
-    <button class="btn btn-sm btn-primary" onclick="addLine()">+ Add Item</button>
+    <div style="display:flex;gap:8px">
+      <button class="btn btn-sm btn-outline" onclick="openBulkAddMake()">+ Add Make</button>
+      <button class="btn btn-sm btn-primary" onclick="addLine()">+ Add Item</button>
+    </div>
   </div>
   <div id="lines-wrap"></div>
   <div class="empty-state" id="lines-empty">No items yet — add a spec line to start comparing makes.</div>
+</div>
+
+<div class="card" id="compare-card" style="display:none">
+  <h2 class="card-title">Compare Makes</h2>
+  <p style="font-size:12.5px;color:var(--text-muted);margin-top:-6px">
+    Pick two or more suppliers to see total profit across every line each one has quoted — not just line by line.
+  </p>
+  <div id="compare-checks" style="display:flex;flex-wrap:wrap;gap:14px;margin:10px 0"></div>
+  <div class="table-wrap" id="compare-table-wrap" style="display:none">
+    <table class="data-table">
+      <thead>
+        <tr><th>Supplier</th><th>Lines Quoted</th><th>Total Purchase</th><th>Total Sale</th><th>Total Margin</th><th>Margin %</th></tr>
+      </thead>
+      <tbody id="compare-tbody"></tbody>
+    </table>
+  </div>
+</div>
+
+<!-- Bulk Add Make Modal -->
+<div id="modal-bulk-make" class="modal hidden">
+  <div class="modal-box modal-wide">
+    <div class="modal-header">
+      <h3>Add a Make — quote one supplier across all lines</h3>
+      <button class="btn-icon" onclick="closeModal('modal-bulk-make')">✕</button>
+    </div>
+    <div class="form-group">
+      <label>Supplier</label>
+      <select id="bulk-supplier-select" class="input" onchange="onBulkSupplierChange()">
+        <option value="">— Select a supplier —</option>
+      </select>
+    </div>
+    <div id="bulk-lines-wrap" style="max-height:55vh;overflow-y:auto;display:flex;flex-direction:column;gap:10px"></div>
+  </div>
 </div>
 
 <!-- Add Option Modal -->
@@ -108,6 +144,8 @@ async function init() {
     '<option value="">All suppliers</option>' + allSuppliers.map(s => `<option value="${s.id}">${esc(s.name)}</option>`).join('');
   document.getElementById('opt-manual-supplier').innerHTML =
     '<option value="">— None —</option>' + allSuppliers.map(s => `<option value="${s.id}">${esc(s.name)}</option>`).join('');
+  document.getElementById('bulk-supplier-select').innerHTML =
+    '<option value="">— Select a supplier —</option>' + allSuppliers.map(s => `<option value="${s.id}">${esc(s.name)}</option>`).join('');
 
   if (PID) {
     document.getElementById('page-title').textContent = 'Edit Project';
@@ -243,6 +281,147 @@ function addManualOption() {
   render();
 }
 
+// ── Bulk "Add Make" — quote one supplier across every existing line ────────────
+let bulkSupplierId = null;
+let bulkSearchTimeouts = {};
+
+function openBulkAddMake() {
+  if (!projectItems.length) {
+    alert('Add at least one spec line first, then use Add Make to quote suppliers against them.');
+    return;
+  }
+  bulkSupplierId = null;
+  document.getElementById('bulk-supplier-select').value = '';
+  document.getElementById('bulk-lines-wrap').innerHTML = '<div class="empty-state">Pick a supplier above to start.</div>';
+  showModal('modal-bulk-make');
+}
+
+function onBulkSupplierChange() {
+  bulkSupplierId = document.getElementById('bulk-supplier-select').value;
+  if (!bulkSupplierId) {
+    document.getElementById('bulk-lines-wrap').innerHTML = '<div class="empty-state">Pick a supplier above to start.</div>';
+    return;
+  }
+  renderBulkLines();
+}
+
+function renderBulkLines() {
+  const wrap = document.getElementById('bulk-lines-wrap');
+  wrap.innerHTML = projectItems.map((item, idx) => {
+    const existing = item.options.find(o => String(o.supplier_id) === String(bulkSupplierId));
+    return `
+      <div class="bulk-line">
+        <div class="bulk-line-head">
+          <strong>${esc(item.description) || '(untitled line)'}</strong>
+          ${existing ? `<span class="badge" style="background:var(--success-light,#dcfce7);color:var(--success,#16a34a)">Quoted: ₹${existing.list_price}</span>` : ''}
+        </div>
+        <input type="text" class="input-sm" placeholder="Search this supplier's catalog…" value="${esc(item.description)}" oninput="bulkSearchForLine(${idx}, this.value)"/>
+        <div class="bulk-results" id="bulk-results-${idx}"></div>
+      </div>
+    `;
+  }).join('');
+  // Auto-run a first search per line using its own description, so most
+  // lines are one click away instead of needing to retype the spec.
+  projectItems.forEach((item, idx) => { if (item.description) bulkSearchForLine(idx, item.description); });
+}
+
+function bulkSearchForLine(idx, query) {
+  clearTimeout(bulkSearchTimeouts[idx]);
+  const el = document.getElementById(`bulk-results-${idx}`);
+  const q = (query || '').trim();
+  if (q.length < 2 || !el) { if (el) el.innerHTML = ''; return; }
+  bulkSearchTimeouts[idx] = setTimeout(async () => {
+    const url = `/api/items?q=${encodeURIComponent(q)}&limit=5&supplier_id=${bulkSupplierId}`;
+    const items = await fetch(url).then(r => r.json());
+    if (!items.length) { el.innerHTML = '<div class="sr-empty">No match in this supplier\'s catalog</div>'; return; }
+    el.innerHTML = items.map(i => `
+      <div class="sr-item" onclick="bulkAttachOption(${idx}, ${JSON.stringify(i).replace(/"/g,'&quot;')})">
+        <div class="sr-desc">${esc(i.description)}</div>
+        <div class="sr-meta">
+          ${i.code ? `<span class="sr-code">${esc(i.code)}</span>` : ''}
+          <span class="sr-price">₹ ${i.base_price.toLocaleString('en-IN', {minimumFractionDigits:2})}</span>
+        </div>
+      </div>
+    `).join('');
+  }, 250);
+}
+
+function bulkAttachOption(idx, catalogItem) {
+  const item = projectItems[idx];
+  const existingIdx = item.options.findIndex(o => String(o.supplier_id) === String(bulkSupplierId));
+  const newOption = {
+    supplier_id: catalogItem.supplier_id, supplier_name: catalogItem.supplier_name, item_id: catalogItem.id,
+    code: catalogItem.code || '', description: catalogItem.description, unit: catalogItem.unit || 'Nos',
+    list_price: catalogItem.base_price, purchase_adj_type: 'discount', purchase_adj_value: 0,
+  };
+  if (existingIdx >= 0) item.options[existingIdx] = newOption;
+  else {
+    item.options.push(newOption);
+    if (item.selected_option_index === -1) item.selected_option_index = item.options.length - 1;
+  }
+  renderBulkLines();
+  render();
+}
+
+// ── Compare Makes — whole-project rollup per supplier ───────────────────────────
+let compareChecked = new Set();
+
+function supplierNamesInProject() {
+  const names = new Set();
+  projectItems.forEach(it => it.options.forEach(o => { if (o.supplier_name) names.add(o.supplier_name); }));
+  return [...names].sort();
+}
+
+function toggleCompare(name, checked) {
+  if (checked) compareChecked.add(name);
+  else compareChecked.delete(name);
+  renderCompare();
+}
+
+function renderCompare() {
+  const names = supplierNamesInProject();
+  const card = document.getElementById('compare-card');
+  if (names.length < 2) { card.style.display = 'none'; return; }
+  card.style.display = '';
+
+  document.getElementById('compare-checks').innerHTML = names.map(n => `
+    <label class="checkbox-label">
+      <input type="checkbox" ${compareChecked.has(n) ? 'checked' : ''} onchange="toggleCompare('${jsAttr(n)}', this.checked)"/>
+      <span>${esc(n)}</span>
+    </label>
+  `).join('');
+
+  const tableWrap = document.getElementById('compare-table-wrap');
+  const active = names.filter(n => compareChecked.has(n));
+  if (active.length < 2) { tableWrap.style.display = 'none'; return; }
+  tableWrap.style.display = '';
+
+  const rows = active.map(supplierName => {
+    let linesQuoted = 0, totalPurchase = 0, totalSale = 0;
+    projectItems.forEach(item => {
+      const opt = item.options.find(o => o.supplier_name === supplierName);
+      if (!opt) return;
+      linesQuoted++;
+      totalPurchase += computePrice(opt.list_price, opt.purchase_adj_type, opt.purchase_adj_value) * item.quantity;
+      totalSale += computePrice(opt.list_price, item.sale_adj_type, item.sale_adj_value) * item.quantity;
+    });
+    const margin = totalSale - totalPurchase;
+    const marginPct = totalSale > 0 ? (margin / totalSale * 100) : 0;
+    return { supplierName, linesQuoted, totalPurchase, totalSale, margin, marginPct };
+  });
+
+  document.getElementById('compare-tbody').innerHTML = rows.map(r => `
+    <tr>
+      <td><strong>${esc(r.supplierName)}</strong></td>
+      <td>${r.linesQuoted} / ${projectItems.length}</td>
+      <td class="right">₹${r.totalPurchase.toLocaleString('en-IN',{minimumFractionDigits:2})}</td>
+      <td class="right">₹${r.totalSale.toLocaleString('en-IN',{minimumFractionDigits:2})}</td>
+      <td class="right" style="color:${r.margin>=0?'var(--success,#16a34a)':'var(--danger)'};font-weight:700">₹${r.margin.toLocaleString('en-IN',{minimumFractionDigits:2})}</td>
+      <td class="right">${r.marginPct.toFixed(1)}%</td>
+    </tr>
+  `).join('');
+}
+
 function render() {
   const wrap = document.getElementById('lines-wrap');
   document.getElementById('lines-empty').style.display = projectItems.length ? 'none' : '';
@@ -325,6 +504,8 @@ function render() {
 
   const allSelected = projectItems.length > 0 && projectItems.every(it => it.selected_option_index >= 0);
   document.getElementById('btn-generate').disabled = !allSelected;
+
+  renderCompare();
 }
 
 function collectPayload() {
@@ -381,6 +562,7 @@ async function generateQuotation() {
 }
 
 function esc(s) { return String(s||'').replace(/&/g,'&amp;').replace(/"/g,'&quot;').replace(/</g,'&lt;'); }
+function jsAttr(s) { return String(s||'').replace(/\\/g,'\\\\').replace(/'/g,"\\'").replace(/\n/g,' '); }
 init();
 </script>
 <style>
@@ -390,5 +572,9 @@ init();
 .opt-radio { display: flex; align-items: center; gap: 6px; cursor: pointer; }
 .btn-icon.danger { color: var(--danger); }
 #btn-generate:disabled { opacity: .5; cursor: not-allowed; }
+.bulk-line { border: 1px solid var(--border-soft); border-radius: var(--radius-sm); padding: 10px; }
+.bulk-line-head { display: flex; align-items: center; justify-content: space-between; gap: 8px; margin-bottom: 6px; }
+.bulk-results { margin-top: 6px; max-height: 160px; overflow-y: auto; }
+.bulk-results .sr-item { border: 1px solid var(--border-soft); border-radius: 6px; margin-bottom: 4px; }
 </style>
 {% endblock %}
