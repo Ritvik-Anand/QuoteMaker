@@ -162,6 +162,7 @@ async function init() {
         supplier_id: o.supplier_id, supplier_name: o.supplier_name, item_id: o.item_id,
         code: o.code, description: o.description, unit: o.unit, list_price: o.list_price,
         purchase_adj_type: o.purchase_adj_type, purchase_adj_value: o.purchase_adj_value,
+        sale_adj_type: o.sale_adj_type, sale_adj_value: o.sale_adj_value,
       })),
     }));
   }
@@ -173,6 +174,46 @@ function computePrice(base, adjType, adjVal) {
   if (adjType === 'markup') price = base * (1 + adjVal / 100);
   else if (adjType === 'discount') price = base * (1 - adjVal / 100);
   return Math.round(price * 100) / 100;
+}
+
+// ── Spec-mismatch detection ──────────────────────────────────────────────────
+// Deliberately deterministic regex extraction, not fuzzy text matching —
+// wording varies too much across suppliers to trust similarity scoring for
+// something that can silently misquote a completely different product.
+// Only flags a dimension when BOTH sides state it and they disagree; a
+// dimension only one side mentions isn't treated as a conflict.
+function extractSpecTokens(desc) {
+  desc = desc || '';
+  const tokens = {};
+  const size = desc.match(/([\d.]+)\s*sq\.?\s*mm/i);
+  if (size) tokens.size = parseFloat(size[1]);
+  const volt = desc.match(/\b(LT|HT)\b/);
+  if (volt) tokens.volt = volt[1].toUpperCase();
+  const kv = desc.match(/(\d+(?:\.\d+)?)\s*kV\b/i);
+  if (kv) tokens.kv = parseFloat(kv[1]);
+  const amp = desc.match(/(\d+)\s*A\b/i);
+  if (amp) tokens.amp = parseFloat(amp[1]);
+  const ma = desc.match(/(\d+)\s*mA\b/i);
+  if (ma) tokens.ma = parseFloat(ma[1]);
+  const pole = desc.match(/\b(VTPN|TPN|SPN|DP|TP|SP|FP)\b/);
+  if (pole) tokens.pole = pole[1].toUpperCase();
+  const ways = desc.match(/(\d+)\s*Way\b/i);
+  if (ways) tokens.ways = parseFloat(ways[1]);
+  return tokens;
+}
+
+const SPEC_LABELS = { size: 'Size', volt: 'Voltage class', kv: 'kV rating', amp: 'Amp rating', ma: 'mA sensitivity', pole: 'Poles', ways: 'Ways' };
+
+function specMismatch(lineDesc, optDesc) {
+  if (!lineDesc || !optDesc) return [];
+  const a = extractSpecTokens(lineDesc), b = extractSpecTokens(optDesc);
+  const mismatches = [];
+  for (const key in SPEC_LABELS) {
+    if (a[key] !== undefined && b[key] !== undefined && a[key] !== b[key]) {
+      mismatches.push(`${SPEC_LABELS[key]}: line wants ${a[key]}, this is ${b[key]}`);
+    }
+  }
+  return mismatches;
 }
 
 function addLine() {
@@ -211,7 +252,7 @@ function removeOption(itemIdx, optIdx) {
 
 function onOptionChange(itemIdx, optIdx, field, value) {
   const opt = projectItems[itemIdx].options[optIdx];
-  if (field === 'list_price' || field === 'purchase_adj_value') opt[field] = parseFloat(value) || 0;
+  if (field === 'list_price' || field === 'purchase_adj_value' || field === 'sale_adj_value') opt[field] = parseFloat(value) || 0;
   else opt[field] = value;
   render();
 }
@@ -237,7 +278,10 @@ function searchOptionItems() {
     const url = `/api/items?q=${encodeURIComponent(q)}&limit=30${sid ? '&supplier_id='+sid : ''}`;
     const items = await fetch(url).then(r => r.json());
     if (!items.length) { el.innerHTML = '<div class="sr-empty">No items found</div>'; return; }
-    el.innerHTML = items.map(i => `
+    const lineDesc = addOptionTargetIdx !== null ? projectItems[addOptionTargetIdx].description : '';
+    el.innerHTML = items.map(i => {
+      const mismatches = specMismatch(lineDesc, i.description);
+      return `
       <div class="sr-item" onclick="addSearchOption(${JSON.stringify(i).replace(/"/g,'&quot;')})">
         <div class="sr-desc">${esc(i.description)}</div>
         <div class="sr-meta">
@@ -245,8 +289,10 @@ function searchOptionItems() {
           ${i.code ? `<span class="sr-code">${esc(i.code)}</span>` : ''}
           <span class="sr-price">₹ ${i.base_price.toLocaleString('en-IN', {minimumFractionDigits:2})}</span>
         </div>
+        ${mismatches.length ? `<div class="spec-mismatch">⚠ ${esc(mismatches.join('; '))}</div>` : ''}
       </div>
-    `).join('');
+    `;
+    }).join('');
   }, 250);
 }
 
@@ -256,6 +302,7 @@ function addSearchOption(item) {
     supplier_id: item.supplier_id, supplier_name: item.supplier_name, item_id: item.id,
     code: item.code || '', description: item.description, unit: item.unit || 'Nos',
     list_price: item.base_price, purchase_adj_type: 'discount', purchase_adj_value: 0,
+    sale_adj_type: target.sale_adj_type || 'discount', sale_adj_value: target.sale_adj_value || 0,
   });
   if (target.selected_option_index === -1) target.selected_option_index = target.options.length - 1;
   if (!target.description) target.description = item.description;
@@ -275,6 +322,7 @@ function addManualOption() {
     supplier_id: sid ? Number(sid) : null, supplier_name: supplier ? supplier.name : '',
     item_id: null, code: '', description: desc, unit: target.unit || 'Nos',
     list_price: price, purchase_adj_type: 'discount', purchase_adj_value: 0,
+    sale_adj_type: target.sale_adj_type || 'discount', sale_adj_value: target.sale_adj_value || 0,
   });
   if (target.selected_option_index === -1) target.selected_option_index = target.options.length - 1;
   closeModal('modal-add-option');
@@ -334,25 +382,36 @@ function bulkSearchForLine(idx, query) {
     const url = `/api/items?q=${encodeURIComponent(q)}&limit=5&supplier_id=${bulkSupplierId}`;
     const items = await fetch(url).then(r => r.json());
     if (!items.length) { el.innerHTML = '<div class="sr-empty">No match in this supplier\'s catalog</div>'; return; }
-    el.innerHTML = items.map(i => `
+    const lineDesc = projectItems[idx].description;
+    el.innerHTML = items.map(i => {
+      const mismatches = specMismatch(lineDesc, i.description);
+      return `
       <div class="sr-item" onclick="bulkAttachOption(${idx}, ${JSON.stringify(i).replace(/"/g,'&quot;')})">
         <div class="sr-desc">${esc(i.description)}</div>
         <div class="sr-meta">
           ${i.code ? `<span class="sr-code">${esc(i.code)}</span>` : ''}
           <span class="sr-price">₹ ${i.base_price.toLocaleString('en-IN', {minimumFractionDigits:2})}</span>
         </div>
+        ${mismatches.length ? `<div class="spec-mismatch">⚠ ${esc(mismatches.join('; '))}</div>` : ''}
       </div>
-    `).join('');
+    `;
+    }).join('');
   }, 250);
 }
 
 function bulkAttachOption(idx, catalogItem) {
   const item = projectItems[idx];
   const existingIdx = item.options.findIndex(o => String(o.supplier_id) === String(bulkSupplierId));
+  // Re-picking a make that was already on this line keeps its sale terms —
+  // only the catalog item/price is being swapped, not a deliberate discount
+  // the user already dialed in.
+  const existingSale = existingIdx >= 0 ? item.options[existingIdx] : null;
   const newOption = {
     supplier_id: catalogItem.supplier_id, supplier_name: catalogItem.supplier_name, item_id: catalogItem.id,
     code: catalogItem.code || '', description: catalogItem.description, unit: catalogItem.unit || 'Nos',
     list_price: catalogItem.base_price, purchase_adj_type: 'discount', purchase_adj_value: 0,
+    sale_adj_type: existingSale ? existingSale.sale_adj_type : (item.sale_adj_type || 'discount'),
+    sale_adj_value: existingSale ? existingSale.sale_adj_value : (item.sale_adj_value || 0),
   };
   if (existingIdx >= 0) item.options[existingIdx] = newOption;
   else {
@@ -403,7 +462,7 @@ function renderCompare() {
       if (!opt) return;
       linesQuoted++;
       totalPurchase += computePrice(opt.list_price, opt.purchase_adj_type, opt.purchase_adj_value) * item.quantity;
-      totalSale += computePrice(opt.list_price, item.sale_adj_type, item.sale_adj_value) * item.quantity;
+      totalSale += computePrice(opt.list_price, opt.sale_adj_type, opt.sale_adj_value) * item.quantity;
     });
     const margin = totalSale - totalPurchase;
     const marginPct = totalSale > 0 ? (margin / totalSale * 100) : 0;
@@ -431,11 +490,14 @@ function render() {
   wrap.innerHTML = projectItems.map((item, idx) => {
     const optionsHtml = item.options.map((opt, oi) => {
       const purchaseRate = computePrice(opt.list_price, opt.purchase_adj_type, opt.purchase_adj_value);
-      const saleRate = computePrice(opt.list_price, item.sale_adj_type, item.sale_adj_value);
+      const saleRate = computePrice(opt.list_price, opt.sale_adj_type, opt.sale_adj_value);
       const marginUnit = saleRate - purchaseRate;
       const marginTotal = marginUnit * item.quantity;
       const isWinner = item.selected_option_index === oi;
       if (isWinner) { totalPurchase += purchaseRate * item.quantity; totalSale += saleRate * item.quantity; }
+      const mismatches = specMismatch(item.description, opt.description);
+      const mismatchBadge = mismatches.length
+        ? `<div class="spec-mismatch" title="${esc(mismatches.join('; '))}">⚠ ${esc(mismatches.join('; '))}</div>` : '';
       return `
         <tr class="${isWinner ? 'opt-winner' : ''}">
           <td>
@@ -445,7 +507,7 @@ function render() {
             </label>
           </td>
           <td><strong>${esc(opt.supplier_name) || '—'}</strong></td>
-          <td style="min-width:180px">${esc(opt.description)}${opt.code ? `<div style="font-size:11px;color:var(--text-faint)">${esc(opt.code)}</div>` : ''}</td>
+          <td style="min-width:180px">${esc(opt.description)}${opt.code ? `<div style="font-size:11px;color:var(--text-faint)">${esc(opt.code)}</div>` : ''}${mismatchBadge}</td>
           <td><input class="input-inline narrow right" type="number" min="0" step="0.01" value="${opt.list_price}" onchange="onOptionChange(${idx},${oi},'list_price',this.value)"/></td>
           <td>
             <div style="display:flex;gap:4px">
@@ -454,10 +516,20 @@ function render() {
                 <option value="discount" ${opt.purchase_adj_type==='discount'?'selected':''}>Disc %</option>
                 <option value="markup" ${opt.purchase_adj_type==='markup'?'selected':''}>Markup %</option>
               </select>
-              <input class="input-sm" style="width:60px" type="number" min="0" step="0.1" value="${opt.purchase_adj_value}" onchange="onOptionChange(${idx},${oi},'purchase_adj_value',this.value)"/>
+              <input class="input-sm" style="width:55px" type="number" min="0" step="0.1" value="${opt.purchase_adj_value}" onchange="onOptionChange(${idx},${oi},'purchase_adj_value',this.value)"/>
             </div>
           </td>
           <td class="right"><strong>₹${purchaseRate.toLocaleString('en-IN',{minimumFractionDigits:2})}</strong></td>
+          <td>
+            <div style="display:flex;gap:4px">
+              <select class="input-sm" onchange="onOptionChange(${idx},${oi},'sale_adj_type',this.value)">
+                <option value="none" ${opt.sale_adj_type==='none'?'selected':''}>None</option>
+                <option value="discount" ${opt.sale_adj_type==='discount'?'selected':''}>Disc %</option>
+                <option value="markup" ${opt.sale_adj_type==='markup'?'selected':''}>Markup %</option>
+              </select>
+              <input class="input-sm" style="width:55px" type="number" min="0" step="0.1" value="${opt.sale_adj_value}" onchange="onOptionChange(${idx},${oi},'sale_adj_value',this.value)"/>
+            </div>
+          </td>
           <td class="right">₹${saleRate.toLocaleString('en-IN',{minimumFractionDigits:2})}</td>
           <td class="right" style="color:${marginUnit>=0?'var(--success,#16a34a)':'var(--danger)'};font-weight:700">₹${marginTotal.toLocaleString('en-IN',{minimumFractionDigits:2})}</td>
           <td><button class="btn-icon danger" onclick="removeOption(${idx},${oi})" title="Remove">✕</button></td>
@@ -471,7 +543,7 @@ function render() {
           <input type="text" class="input line-desc" placeholder="Spec description, e.g. 1.5 sq.mm FR cable" value="${esc(item.description)}" onchange="onLineChange(${idx},'description',this.value)"/>
           <input type="text" class="input-sm" style="max-width:80px" placeholder="Unit" value="${esc(item.unit)}" onchange="onLineChange(${idx},'unit',this.value)"/>
           <input type="number" class="input-sm" style="max-width:80px" min="0" step="0.01" placeholder="Qty" value="${item.quantity}" onchange="onLineChange(${idx},'quantity',this.value)"/>
-          <span style="font-size:12px;color:var(--text-muted)">Sale:</span>
+          <span style="font-size:12px;color:var(--text-muted)" title="Seeds the sale discount/markup for makes you add to this line next — each make's own sale terms can still be edited independently below.">Default sale for new makes:</span>
           <select class="input-sm" onchange="onLineChange(${idx},'sale_adj_type',this.value)">
             <option value="none" ${item.sale_adj_type==='none'?'selected':''}>None</option>
             <option value="discount" ${item.sale_adj_type==='discount'?'selected':''}>Disc %</option>
@@ -483,10 +555,10 @@ function render() {
         <div class="table-wrap">
         <table class="data-table" style="margin-top:10px">
           <thead>
-            <tr><th style="width:70px">Winner</th><th>Supplier</th><th>Item</th><th style="width:100px">List ₹</th><th style="width:150px">Purchase Adj.</th><th>Purchase ₹</th><th>Sale ₹</th><th>Margin</th><th></th></tr>
+            <tr><th style="width:70px">Winner</th><th>Supplier</th><th>Item</th><th style="width:100px">List ₹</th><th style="width:140px">Purchase Adj.</th><th>Purchase ₹</th><th style="width:140px">Sale Adj.</th><th>Sale ₹</th><th>Margin</th><th></th></tr>
           </thead>
           <tbody>
-            ${optionsHtml || '<tr><td colspan="9" class="empty-state">No makes added yet</td></tr>'}
+            ${optionsHtml || '<tr><td colspan="10" class="empty-state">No makes added yet</td></tr>'}
           </tbody>
         </table>
         </div>
@@ -576,5 +648,6 @@ init();
 .bulk-line-head { display: flex; align-items: center; justify-content: space-between; gap: 8px; margin-bottom: 6px; }
 .bulk-results { margin-top: 6px; max-height: 160px; overflow-y: auto; }
 .bulk-results .sr-item { border: 1px solid var(--border-soft); border-radius: 6px; margin-bottom: 4px; }
+.spec-mismatch { margin-top: 4px; font-size: 11px; font-weight: 700; color: var(--danger); background: var(--danger-light); border-radius: 5px; padding: 2px 7px; display: inline-block; }
 </style>
 {% endblock %}

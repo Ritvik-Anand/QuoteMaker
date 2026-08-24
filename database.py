@@ -215,6 +215,11 @@ CREATE TABLE IF NOT EXISTS project_item_options (
     list_price         REAL NOT NULL DEFAULT 0,
     purchase_adj_type  TEXT DEFAULT 'discount',
     purchase_adj_value REAL DEFAULT 0,
+    -- Sale side lives per option (per make, per line) rather than on
+    -- project_items, since two suppliers on the same line can genuinely
+    -- need different sale discounts to each stay worth offering.
+    sale_adj_type      TEXT DEFAULT 'discount',
+    sale_adj_value     REAL DEFAULT 0,
     created_at         TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
 """
@@ -346,6 +351,8 @@ _PG_TABLES = [
         list_price         REAL NOT NULL DEFAULT 0,
         purchase_adj_type  TEXT DEFAULT 'discount',
         purchase_adj_value REAL DEFAULT 0,
+        sale_adj_type      TEXT DEFAULT 'discount',
+        sale_adj_value     REAL DEFAULT 0,
         created_at         TIMESTAMP DEFAULT CURRENT_TIMESTAMP
     )""",
 ]
@@ -365,6 +372,12 @@ _COLUMN_MIGRATIONS = [
     # admin's is_admin flag already implies full access regardless of this
     # column, see auth.py's is_ops() helper.
     ("users", "role", "TEXT DEFAULT 'staff'"),
+    # Sale discount/markup moved from project_items (shared across every
+    # make on a line) down to project_item_options (one per make per line),
+    # since different suppliers on the same line can need different sale
+    # terms to stay worth offering.
+    ("project_item_options", "sale_adj_type", "TEXT DEFAULT 'discount'"),
+    ("project_item_options", "sale_adj_value", "REAL DEFAULT 0"),
 ]
 
 

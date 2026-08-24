@@ -1207,14 +1207,20 @@ def save_project(pid):
         )
         option_ids = []
         for opt in item.get("options", []):
+            # Sale terms are per option (per make, per line) — a new option
+            # not yet given its own sale terms inherits the line's default
+            # so it isn't silently priced at 0, but each one is independently
+            # editable from then on.
             oid = conn.insert(
                 "INSERT INTO project_item_options (project_item_id, supplier_id, supplier_name, "
-                "item_id, code, description, unit, list_price, purchase_adj_type, purchase_adj_value) "
-                "VALUES (?,?,?,?,?,?,?,?,?,?)",
+                "item_id, code, description, unit, list_price, purchase_adj_type, purchase_adj_value, "
+                "sale_adj_type, sale_adj_value) VALUES (?,?,?,?,?,?,?,?,?,?,?,?)",
                 (item_id, opt.get("supplier_id"), opt.get("supplier_name", ""), opt.get("item_id"),
                  opt.get("code", ""), opt["description"], opt.get("unit", "Nos"),
                  float(opt.get("list_price", 0)), opt.get("purchase_adj_type", "discount"),
-                 float(opt.get("purchase_adj_value", 0)))
+                 float(opt.get("purchase_adj_value", 0)),
+                 opt.get("sale_adj_type") or item.get("sale_adj_type", "discount"),
+                 float(opt.get("sale_adj_value") if opt.get("sale_adj_value") is not None else item.get("sale_adj_value", 0)))
             )
             option_ids.append(oid)
         sel_idx = item.get("selected_option_index")
@@ -1281,14 +1287,14 @@ def generate_quotation_from_project(pid):
          session["username"], session["username"])
     )
     for idx, (item, opt) in enumerate(resolved):
-        final_price = _compute_price(opt["list_price"], item["sale_adj_type"], item["sale_adj_value"])
+        final_price = _compute_price(opt["list_price"], opt["sale_adj_type"], opt["sale_adj_value"])
         conn.execute(
             "INSERT INTO quotation_items "
             "(quotation_id, item_id, description, code, unit, quantity, base_price, "
             "adjustment_type, adjustment_value, final_price, sort_order, supplier_name) "
             "VALUES (?,?,?,?,?,?,?,?,?,?,?,?)",
             (qid, opt["item_id"], opt["description"], opt["code"], item["unit"], item["quantity"],
-             opt["list_price"], item["sale_adj_type"], item["sale_adj_value"], final_price, idx,
+             opt["list_price"], opt["sale_adj_type"], opt["sale_adj_value"], final_price, idx,
              opt["supplier_name"])
         )
     conn.execute("UPDATE projects SET quotation_id=?, updated_at=CURRENT_TIMESTAMP WHERE id=?", (qid, pid))
