@@ -403,6 +403,16 @@ textarea.input { resize: vertical; }
 .history-card:last-child { border-bottom: none; }
 .history-card-top { display: flex; align-items: flex-start; justify-content: space-between; gap: 10px; }
 .history-card-tags { margin-top: 6px; }
+
+/* ── Projects / Employees / Payroll: same mobile card-list pattern ── */
+.proj-cards, .emp-cards, .pr-cards { display: none; }
+.proj-card, .emp-card, .pr-card { padding: 14px 4px; border-bottom: 1px solid var(--border-soft); }
+.proj-card:last-child, .emp-card:last-child, .pr-card:last-child { border-bottom: none; }
+.proj-card-top, .emp-card-top, .pr-card-top { display: flex; align-items: center; justify-content: space-between; gap: 10px; }
+.proj-card-meta, .emp-card-meta { margin-top: 5px; font-size: 12.5px; color: var(--text-muted); }
+.proj-card-actions, .emp-card-actions, .pr-card-actions { display: flex; gap: 8px; flex-wrap: wrap; margin-top: 10px; }
+.pr-card-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 8px 16px; margin-top: 8px; font-size: 13px; }
+.pr-card-label { display: block; font-size: 10.5px; font-weight: 700; color: var(--text-muted); text-transform: uppercase; letter-spacing: .4px; }
 .history-card-footer { display: flex; align-items: center; justify-content: space-between; gap: 10px; margin-top: 8px; }
 .history-card-meta { display: flex; align-items: center; gap: 8px; flex-shrink: 0; }
 
@@ -444,6 +454,10 @@ html, body { max-width: 100%; overflow-x: hidden; }
   .filter-user-select { max-width: none; }
   .history-table-wrap { display: none; }
   .history-cards { display: block; }
+
+  /* Projects / Employees / Payroll: same table -> card swap. */
+  .proj-table-wrap, .emp-table-wrap, .pr-table-wrap { display: none; }
+  .proj-cards, .emp-cards, .pr-cards { display: block; }
 
   /* Any input under 16px makes iOS Safari auto-zoom the whole page on
      focus, which is what made the date field (and everything else) look

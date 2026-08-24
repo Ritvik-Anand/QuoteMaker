@@ -6,7 +6,7 @@
   <select id="att-employee" class="input" style="max-width:240px"></select>
 </div>
 
-<div class="card">
+<div class="card cal-card">
   <div class="card-header">
     <div class="cal-nav">
       <button class="btn-icon" onclick="changeMonth(-1)" aria-label="Previous month">&larr;</button>
@@ -133,19 +133,19 @@ initAttendance();
 .cal-weekdays span { text-align: center; font-size: 11px; font-weight: 700; color: var(--text-muted); text-transform: uppercase; letter-spacing: .5px; }
 .cal-grid { display: grid; grid-template-columns: repeat(7, 1fr); gap: 6px; }
 .cal-day {
-  min-height: 78px; border: 1.5px solid var(--border); border-radius: 8px; padding: 6px;
+  min-height: 78px; min-width: 0; border: 1.5px solid var(--border); border-radius: 8px; padding: 6px;
   display: flex; flex-direction: column; justify-content: space-between; background: #fff;
-  transition: background .12s, border-color .12s;
+  transition: background .12s, border-color .12s; box-sizing: border-box;
 }
 .cal-day-pad { border: none; background: transparent; }
 .cal-day-present { background: var(--success-light, #dcfce7); border-color: #86efac; }
 .cal-day-absent { background: var(--danger-light); border-color: #fca5a5; }
-.cal-day-top { display: flex; align-items: center; justify-content: space-between; }
+.cal-day-top { display: flex; align-items: center; justify-content: space-between; min-width: 0; }
 .cal-day-num { font-size: 12px; font-weight: 700; color: var(--text-muted); }
-.cal-day-locked { font-size: 10px; }
-.cal-day-btns { display: flex; gap: 4px; }
+.cal-day-locked { font-size: 10px; flex-shrink: 0; }
+.cal-day-btns { display: flex; gap: 4px; min-width: 0; }
 .cal-btn {
-  flex: 1; padding: 4px 0; border-radius: 5px; border: 1.5px solid var(--border); background: #fff;
+  flex: 1; min-width: 0; padding: 4px 0; border-radius: 5px; border: 1.5px solid var(--border); background: #fff;
   font-size: 11px; font-weight: 700; cursor: pointer; color: var(--text-muted); transition: all .12s;
 }
 .cal-btn:disabled { cursor: not-allowed; opacity: .75; }
@@ -155,8 +155,22 @@ initAttendance();
 .cal-day-off .cal-day-num { color: var(--text-faint); }
 .cal-day-off-label { font-size: 10px; color: var(--text-faint); text-align: center; font-weight: 600; }
 @media (max-width: 640px) {
-  .cal-day { min-height: 60px; padding: 4px; }
-  .cal-btn { font-size: 10px; padding: 3px 0; }
+  /* Reclaim padding specifically here — a 7-column day grid needs every
+     spare pixel far more than this card needs the app's default padding. */
+  .cal-card { padding: 12px 8px; }
+  .cal-weekdays, .cal-grid { gap: 3px; }
+  .cal-day { min-height: 56px; padding: 3px; border-radius: 6px; }
+  .cal-day-num { font-size: 10.5px; }
+  /* Side-by-side P/A buttons get too narrow to reliably tap once 7 columns
+     share a phone-width screen — stacking them keeps each one full-width
+     and thumb-sized instead of shrinking to fit two per cell. */
+  .cal-day-btns { flex-direction: column; gap: 3px; }
+  .cal-btn { font-size: 11px; padding: 5px 0; }
+  .cal-day-off-label { font-size: 9px; }
+}
+@media (max-width: 400px) {
+  .cal-weekdays span { font-size: 9px; }
+  .cal-day { min-height: 50px; }
 }
 </style>
 {% endblock %}

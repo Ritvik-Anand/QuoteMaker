@@ -500,16 +500,16 @@ function render() {
         ? `<div class="spec-mismatch" title="${esc(mismatches.join('; '))}">⚠ ${esc(mismatches.join('; '))}</div>` : '';
       return `
         <tr class="${isWinner ? 'opt-winner' : ''}">
-          <td>
+          <td data-label="Winner">
             <label class="opt-radio">
               <input type="radio" name="winner-${idx}" ${isWinner ? 'checked' : ''} onclick="selectWinner(${idx},${oi})"/>
               ${isWinner ? '<span class="badge" style="background:var(--success-light,#dcfce7);color:var(--success,#16a34a)">Winner</span>' : ''}
             </label>
           </td>
-          <td><strong>${esc(opt.supplier_name) || '—'}</strong></td>
-          <td style="min-width:180px">${esc(opt.description)}${opt.code ? `<div style="font-size:11px;color:var(--text-faint)">${esc(opt.code)}</div>` : ''}${mismatchBadge}</td>
-          <td><input class="input-inline narrow right" type="number" min="0" step="0.01" value="${opt.list_price}" onchange="onOptionChange(${idx},${oi},'list_price',this.value)"/></td>
-          <td>
+          <td data-label="Supplier"><strong>${esc(opt.supplier_name) || '—'}</strong></td>
+          <td data-label="Item" style="min-width:180px">${esc(opt.description)}${opt.code ? `<div style="font-size:11px;color:var(--text-faint)">${esc(opt.code)}</div>` : ''}${mismatchBadge}</td>
+          <td data-label="List ₹"><input class="input-inline narrow right" type="number" min="0" step="0.01" value="${opt.list_price}" onchange="onOptionChange(${idx},${oi},'list_price',this.value)"/></td>
+          <td data-label="Purchase Adj.">
             <div style="display:flex;gap:4px">
               <select class="input-sm" onchange="onOptionChange(${idx},${oi},'purchase_adj_type',this.value)">
                 <option value="none" ${opt.purchase_adj_type==='none'?'selected':''}>None</option>
@@ -519,8 +519,8 @@ function render() {
               <input class="input-sm" style="width:55px" type="number" min="0" step="0.1" value="${opt.purchase_adj_value}" onchange="onOptionChange(${idx},${oi},'purchase_adj_value',this.value)"/>
             </div>
           </td>
-          <td class="right"><strong>₹${purchaseRate.toLocaleString('en-IN',{minimumFractionDigits:2})}</strong></td>
-          <td>
+          <td data-label="Purchase ₹" class="right"><strong>₹${purchaseRate.toLocaleString('en-IN',{minimumFractionDigits:2})}</strong></td>
+          <td data-label="Sale Adj.">
             <div style="display:flex;gap:4px">
               <select class="input-sm" onchange="onOptionChange(${idx},${oi},'sale_adj_type',this.value)">
                 <option value="none" ${opt.sale_adj_type==='none'?'selected':''}>None</option>
@@ -530,8 +530,8 @@ function render() {
               <input class="input-sm" style="width:55px" type="number" min="0" step="0.1" value="${opt.sale_adj_value}" onchange="onOptionChange(${idx},${oi},'sale_adj_value',this.value)"/>
             </div>
           </td>
-          <td class="right">₹${saleRate.toLocaleString('en-IN',{minimumFractionDigits:2})}</td>
-          <td class="right" style="color:${marginUnit>=0?'var(--success,#16a34a)':'var(--danger)'};font-weight:700">₹${marginTotal.toLocaleString('en-IN',{minimumFractionDigits:2})}</td>
+          <td data-label="Sale ₹" class="right">₹${saleRate.toLocaleString('en-IN',{minimumFractionDigits:2})}</td>
+          <td data-label="Margin" class="right" style="color:${marginUnit>=0?'var(--success,#16a34a)':'var(--danger)'};font-weight:700">₹${marginTotal.toLocaleString('en-IN',{minimumFractionDigits:2})}</td>
           <td><button class="btn-icon danger" onclick="removeOption(${idx},${oi})" title="Remove">✕</button></td>
         </tr>
       `;
@@ -552,8 +552,8 @@ function render() {
           <input class="input-sm" style="width:60px" type="number" min="0" step="0.1" value="${item.sale_adj_value}" onchange="onLineChange(${idx},'sale_adj_value',this.value)"/>
           <button class="btn-icon danger" onclick="removeLine(${idx})" title="Remove line">✕</button>
         </div>
-        <div class="table-wrap">
-        <table class="data-table" style="margin-top:10px">
+        <div class="table-wrap opt-table-wrap">
+        <table class="data-table opt-table" style="margin-top:10px">
           <thead>
             <tr><th style="width:70px">Winner</th><th>Supplier</th><th>Item</th><th style="width:100px">List ₹</th><th style="width:140px">Purchase Adj.</th><th>Purchase ₹</th><th style="width:140px">Sale Adj.</th><th>Sale ₹</th><th>Margin</th><th></th></tr>
           </thead>
@@ -639,15 +639,65 @@ init();
 </script>
 <style>
 .line-head { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+/* .table-wrap's global 420px scroll cap exists for long desktop data
+   tables — the whole point of the makes comparison is to see every
+   option at once, so this table opts out of it (and doubly needs to,
+   since each row grows tall once mobile stacks its cells into a card). */
+.opt-table-wrap { max-height: none; }
 .line-desc { flex: 1; min-width: 200px; font-weight: 600; }
 .opt-winner { background: var(--success-light, #dcfce7); }
 .opt-radio { display: flex; align-items: center; gap: 6px; cursor: pointer; }
 .btn-icon.danger { color: var(--danger); }
 #btn-generate:disabled { opacity: .5; cursor: not-allowed; }
 .bulk-line { border: 1px solid var(--border-soft); border-radius: var(--radius-sm); padding: 10px; }
-.bulk-line-head { display: flex; align-items: center; justify-content: space-between; gap: 8px; margin-bottom: 6px; }
+.bulk-line-head { display: flex; align-items: center; justify-content: space-between; gap: 8px; margin-bottom: 6px; flex-wrap: wrap; }
+.bulk-line input[type="text"] { width: 100%; }
 .bulk-results { margin-top: 6px; max-height: 160px; overflow-y: auto; }
 .bulk-results .sr-item { border: 1px solid var(--border-soft); border-radius: 6px; margin-bottom: 4px; }
 .spec-mismatch { margin-top: 4px; font-size: 11px; font-weight: 700; color: var(--danger); background: var(--danger-light); border-radius: 5px; padding: 2px 7px; display: inline-block; }
+
+@media (max-width: 768px) {
+  /* Line header: description gets its own full-width row instead of
+     squeezing next to unit/qty/sale controls that then wrap unpredictably. */
+  .line-desc { flex: 1 1 100%; min-width: 0; }
+  .line-head > select, .line-head > input:not(.line-desc) { flex: 0 0 auto; }
+
+  /* Options table -> stacked cards, same "label above/beside value"
+     technique used for the mobile item cards elsewhere in the app, driven
+     by data-label attributes already on each cell rather than a second
+     render path — one source of truth for the numbers either way. */
+  .opt-table thead { display: none; }
+  .opt-table, .opt-table tbody, .opt-table tr, .opt-table td { display: block; width: 100%; }
+  .opt-table { border: none; }
+  .opt-table tr {
+    border: 1.5px solid var(--border-soft); border-radius: 8px; margin-bottom: 10px;
+    padding: 10px 12px; background: #fff;
+  }
+  .opt-table tr.opt-winner { background: var(--success-light, #dcfce7); border-color: #86efac; }
+  .opt-table td {
+    border: none; border-bottom: 1px dashed var(--border-soft); padding: 7px 0;
+    display: flex; align-items: center; justify-content: space-between; gap: 10px;
+  }
+  .opt-table td:last-child { border-bottom: none; padding-top: 10px; justify-content: flex-end; }
+  .opt-table td[data-label]::before {
+    content: attr(data-label); font-weight: 700; font-size: 10.5px; color: var(--text-muted);
+    text-transform: uppercase; letter-spacing: .4px; flex-shrink: 0;
+  }
+  /* The Item cell is a paragraph (description + code + mismatch warning),
+     not a single value — label-above reads better than label-beside here.
+     Same for the two adjustment cells: a select + number input together
+     are wider than a phone can fit beside a label without overflowing. */
+  .opt-table td[data-label="Item"],
+  .opt-table td[data-label="Purchase Adj."],
+  .opt-table td[data-label="Sale Adj."] { flex-direction: column; align-items: flex-start; }
+  .opt-table td[data-label="Item"]::before,
+  .opt-table td[data-label="Purchase Adj."]::before,
+  .opt-table td[data-label="Sale Adj."]::before { margin-bottom: 5px; }
+  .opt-table td[data-label="Purchase Adj."] > div,
+  .opt-table td[data-label="Sale Adj."] > div { width: 100%; }
+  .opt-table td[data-label="Purchase Adj."] select,
+  .opt-table td[data-label="Sale Adj."] select { flex: 1; min-width: 0; }
+  .opt-table td .input-inline, .opt-table td .input-sm { max-width: 130px; }
+}
 </style>
 {% endblock %}

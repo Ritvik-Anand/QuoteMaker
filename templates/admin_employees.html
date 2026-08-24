@@ -18,7 +18,7 @@
 </div>
 
 <div class="card">
-  <div class="table-wrap">
+  <div class="table-wrap emp-table-wrap">
   <table class="data-table">
     <thead>
       <tr><th>Name</th><th>Monthly Salary</th><th>Status</th><th>Actions</th></tr>
@@ -28,6 +28,7 @@
     </tbody>
   </table>
   </div>
+  <div class="emp-cards" id="emp-cards"></div>
 </div>
 
 <div id="modal-employee" class="modal hidden">
@@ -70,8 +71,10 @@ async function loadEmployees() {
     '₹' + active.reduce((s, e) => s + Number(e.monthly_salary), 0).toLocaleString('en-IN', {maximumFractionDigits: 0});
 
   const tbody = document.getElementById('emp-tbody');
+  const cards = document.getElementById('emp-cards');
   if (!employees.length) {
     tbody.innerHTML = '<tr><td colspan="4" class="empty-state">No employees yet — add your first one.</td></tr>';
+    cards.innerHTML = '<div class="empty-state">No employees yet — add your first one.</div>';
     return;
   }
   tbody.innerHTML = employees.map(e => `
@@ -84,6 +87,20 @@ async function loadEmployees() {
         <button class="btn btn-sm btn-danger" onclick="deleteEmployee(${e.id}, '${esc(e.name)}')">Delete</button>
       </td>
     </tr>
+  `).join('');
+
+  cards.innerHTML = employees.map(e => `
+    <div class="emp-card">
+      <div class="emp-card-top">
+        <strong>${esc(e.name)}</strong>
+        <span class="badge ${e.active ? '' : 'badge-admin'}">${e.active ? 'Active' : 'Inactive'}</span>
+      </div>
+      <div class="emp-card-meta">₹${Number(e.monthly_salary).toLocaleString('en-IN', {minimumFractionDigits: 2})} / month</div>
+      <div class="emp-card-actions">
+        <button class="btn btn-sm" onclick='showEditEmployee(${JSON.stringify(e)})'>Edit</button>
+        <button class="btn btn-sm btn-danger" onclick="deleteEmployee(${e.id}, '${esc(e.name)}')">Delete</button>
+      </div>
+    </div>
   `).join('');
 }
 

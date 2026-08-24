@@ -29,7 +29,7 @@
 </div>
 
 <div class="card">
-  <div class="table-wrap">
+  <div class="table-wrap pr-table-wrap">
   <table class="data-table">
     <thead>
       <tr>
@@ -49,6 +49,7 @@
     </tbody>
   </table>
   </div>
+  <div class="pr-cards" id="pr-cards"></div>
 </div>
 {% endblock %}
 {% block scripts %}
@@ -81,15 +82,18 @@ async function loadPayroll() {
   document.getElementById('pr-stat-final').textContent = fmtMoney(rows.reduce((s, r) => s + Number(r.final_pay), 0));
 
   const tbody = document.getElementById('pr-tbody');
+  const cards = document.getElementById('pr-cards');
   if (!rows.length) {
-    tbody.innerHTML = `<tr><td colspan="9" class="empty-state">${IS_ADMIN ? 'No payroll generated for this period yet — click "Generate / Refresh".' : 'Nothing sent to you for this period yet.'}</td></tr>`;
+    const emptyMsg = IS_ADMIN ? 'No payroll generated for this period yet — click "Generate / Refresh".' : 'Nothing sent to you for this period yet.';
+    tbody.innerHTML = `<tr><td colspan="9" class="empty-state">${emptyMsg}</td></tr>`;
+    cards.innerHTML = `<div class="empty-state">${emptyMsg}</div>`;
     return;
   }
   tbody.innerHTML = rows.map(r => {
     const unmarked = r.calendar_days - r.present_days - r.absent_days;
     const editable = IS_ADMIN && r.status === 'draft';
     const finalPayCell = editable
-      ? `<input type="number" class="input-sm" style="width:110px" value="${r.final_pay}" data-pid="${r.id}" onblur="saveFinalPay(${r.id}, this.value)"/>`
+      ? `<input type="number" class="input-sm" style="width:110px" value="${r.final_pay}" onblur="saveFinalPay(${r.id}, this.value)"/>`
       : fmtMoney(r.final_pay);
     const actions = [];
     if (IS_ADMIN && r.status === 'finalized') {
@@ -110,6 +114,38 @@ async function loadPayroll() {
         <td><span class="badge ${STATUS_CLASS[r.status] || ''}">${STATUS_LABEL[r.status] || r.status}</span></td>
         <td class="actions-cell">${actions.join('') || '—'}</td>
       </tr>
+    `;
+  }).join('');
+
+  cards.innerHTML = rows.map(r => {
+    const unmarked = r.calendar_days - r.present_days - r.absent_days;
+    const editable = IS_ADMIN && r.status === 'draft';
+    const finalPayCell = editable
+      ? `<input type="number" class="input-sm" style="width:100%" value="${r.final_pay}" onblur="saveFinalPay(${r.id}, this.value)"/>`
+      : fmtMoney(r.final_pay);
+    const actions = [];
+    if (IS_ADMIN && r.status === 'finalized') {
+      actions.push(`<button class="btn btn-sm btn-outline" onclick="revertPayroll(${r.id})">Revert to Draft</button>`);
+    }
+    if (r.status === 'finalized') {
+      actions.push(`<button class="btn btn-sm btn-primary" onclick="markPaid(${r.id})">Mark Paid</button>`);
+    }
+    return `
+      <div class="pr-card">
+        <div class="pr-card-top">
+          <strong>${esc(r.employee_name)}</strong>
+          <span class="badge ${STATUS_CLASS[r.status] || ''}">${STATUS_LABEL[r.status] || r.status}</span>
+        </div>
+        <div class="pr-card-grid">
+          <div><span class="pr-card-label">Salary</span>${fmtMoney(r.monthly_salary)}</div>
+          <div><span class="pr-card-label">Present</span>${r.present_days}</div>
+          <div><span class="pr-card-label">Absent</span>${r.absent_days}</div>
+          <div><span class="pr-card-label">Unmarked</span>${unmarked > 0 ? `<span style="color:var(--text-muted)">${unmarked}</span>` : '0'}</div>
+          <div><span class="pr-card-label">Computed Pay</span>${fmtMoney(r.computed_pay)}</div>
+          <div><span class="pr-card-label">Final Pay</span>${finalPayCell}</div>
+        </div>
+        ${actions.length ? `<div class="pr-card-actions">${actions.join('')}</div>` : ''}
+      </div>
     `;
   }).join('');
 }
