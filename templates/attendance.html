@@ -1,0 +1,162 @@
+{% extends "base.html" %}
+{% block title %}Attendance{% endblock %}
+{% block content %}
+<div class="page-header">
+  <h1>Attendance</h1>
+  <select id="att-employee" class="input" style="max-width:240px"></select>
+</div>
+
+<div class="card">
+  <div class="card-header">
+    <div class="cal-nav">
+      <button class="btn-icon" onclick="changeMonth(-1)" aria-label="Previous month">&larr;</button>
+      <span class="card-title" id="cal-label">—</span>
+      <button class="btn-icon" onclick="changeMonth(1)" aria-label="Next month">&rarr;</button>
+    </div>
+    <span id="cal-summary" style="color:var(--text-muted);font-size:12.5px">—</span>
+  </div>
+
+  <div class="cal-weekdays">
+    <span>Sun</span><span>Mon</span><span>Tue</span><span>Wed</span><span>Thu</span><span>Fri</span><span>Sat</span>
+  </div>
+  <div class="cal-grid" id="cal-grid">
+    <div class="empty-state">Loading…</div>
+  </div>
+</div>
+{% endblock %}
+{% block scripts %}
+<script>
+const IS_ADMIN = {{ 'true' if session.is_admin else 'false' }};
+const MONTH_NAMES = ['January','February','March','April','May','June','July','August','September','October','November','December'];
+
+let currentEmployeeId = null;
+let currentYear, currentMonth;
+
+async function initAttendance() {
+  const now = new Date();
+  currentYear = now.getFullYear();
+  currentMonth = now.getMonth() + 1;
+
+  const employees = await fetch('/api/employees').then(r => r.json());
+  const active = employees.filter(e => e.active);
+  const sel = document.getElementById('att-employee');
+  if (!active.length) {
+    sel.innerHTML = '<option>No employees yet</option>';
+    document.getElementById('cal-grid').innerHTML = '<div class="empty-state">No active employees — ask an admin to add employees first.</div>';
+    return;
+  }
+  sel.innerHTML = active.map(e => `<option value="${e.id}">${esc(e.name)}</option>`).join('');
+  currentEmployeeId = active[0].id;
+  sel.value = currentEmployeeId;
+  sel.onchange = () => { currentEmployeeId = Number(sel.value); loadCalendar(); };
+  loadCalendar();
+}
+
+function changeMonth(delta) {
+  currentMonth += delta;
+  if (currentMonth < 1) { currentMonth = 12; currentYear--; }
+  if (currentMonth > 12) { currentMonth = 1; currentYear++; }
+  loadCalendar();
+}
+
+async function loadCalendar() {
+  if (!currentEmployeeId) return;
+  document.getElementById('cal-label').textContent = `${MONTH_NAMES[currentMonth-1]} ${currentYear}`;
+  const data = await fetch(`/api/attendance/calendar?employee_id=${currentEmployeeId}&year=${currentYear}&month=${currentMonth}`).then(r => r.json());
+  if (data.error) {
+    document.getElementById('cal-grid').innerHTML = `<div class="empty-state">${esc(data.error)}</div>`;
+    return;
+  }
+  renderCalendar(data.days);
+}
+
+function renderCalendar(days) {
+  // Sundays/upcoming days are never workdays, so they're excluded from the
+  // summary entirely rather than counted as present/absent/unmarked.
+  const workdays = days.filter(d => !d.is_sunday && !d.is_future);
+  const present = workdays.filter(d => d.status === 'present').length;
+  const absent = workdays.filter(d => d.status === 'absent').length;
+  const unmarked = workdays.length - present - absent;
+  document.getElementById('cal-summary').textContent = `${present} present · ${absent} absent · ${unmarked} unmarked`;
+
+  const firstDow = new Date(currentYear, currentMonth - 1, 1).getDay();
+  const grid = document.getElementById('cal-grid');
+  const cells = [];
+  for (let i = 0; i < firstDow; i++) cells.push('<div class="cal-day cal-day-pad"></div>');
+  days.forEach(d => {
+    const dayNum = Number(d.date.slice(-2));
+    // A Sunday or a not-yet-happened day is never markable — always grey it
+    // out with no buttons, even if it happens to carry an old record from
+    // before this rule existed. This is a hard "not a workday" state, not
+    // the softer "already marked, only an admin can fix it" lock below.
+    if (d.is_sunday || d.is_future) {
+      const label = d.is_sunday ? 'Sunday' : 'Upcoming';
+      cells.push(`
+        <div class="cal-day cal-day-off">
+          <div class="cal-day-top"><span class="cal-day-num">${dayNum}</span></div>
+          <div class="cal-day-off-label">${label}</div>
+        </div>
+      `);
+      return;
+    }
+    const stateClass = d.status === 'present' ? 'cal-day-present' : d.status === 'absent' ? 'cal-day-absent' : '';
+    const lockedNote = d.locked ? '<div class="cal-day-locked" title="Only an admin can change this">🔒</div>' : '';
+    cells.push(`
+      <div class="cal-day ${stateClass}">
+        <div class="cal-day-top"><span class="cal-day-num">${dayNum}</span>${lockedNote}</div>
+        <div class="cal-day-btns">
+          <button type="button" class="cal-btn cal-present ${d.status === 'present' ? 'active' : ''}" ${d.locked ? 'disabled' : ''} onclick="markDay('${d.date}','present')">P</button>
+          <button type="button" class="cal-btn cal-absent ${d.status === 'absent' ? 'active' : ''}" ${d.locked ? 'disabled' : ''} onclick="markDay('${d.date}','absent')">A</button>
+        </div>
+      </div>
+    `);
+  });
+  grid.innerHTML = cells.join('');
+}
+
+async function markDay(dateStr, status) {
+  const r = await fetch('/api/attendance/mark', {
+    method: 'POST', headers: {'Content-Type': 'application/json'},
+    body: JSON.stringify({employee_id: currentEmployeeId, date: dateStr, status})
+  });
+  const data = await r.json();
+  if (data.error) { alert(data.error); loadCalendar(); return; }
+  loadCalendar();
+}
+
+function esc(s) { return String(s||'').replace(/&/g,'&amp;').replace(/"/g,'&quot;').replace(/</g,'&lt;'); }
+initAttendance();
+</script>
+<style>
+.cal-nav { display: flex; align-items: center; gap: 10px; }
+.cal-weekdays { display: grid; grid-template-columns: repeat(7, 1fr); gap: 6px; margin-bottom: 6px; }
+.cal-weekdays span { text-align: center; font-size: 11px; font-weight: 700; color: var(--text-muted); text-transform: uppercase; letter-spacing: .5px; }
+.cal-grid { display: grid; grid-template-columns: repeat(7, 1fr); gap: 6px; }
+.cal-day {
+  min-height: 78px; border: 1.5px solid var(--border); border-radius: 8px; padding: 6px;
+  display: flex; flex-direction: column; justify-content: space-between; background: #fff;
+  transition: background .12s, border-color .12s;
+}
+.cal-day-pad { border: none; background: transparent; }
+.cal-day-present { background: var(--success-light, #dcfce7); border-color: #86efac; }
+.cal-day-absent { background: var(--danger-light); border-color: #fca5a5; }
+.cal-day-top { display: flex; align-items: center; justify-content: space-between; }
+.cal-day-num { font-size: 12px; font-weight: 700; color: var(--text-muted); }
+.cal-day-locked { font-size: 10px; }
+.cal-day-btns { display: flex; gap: 4px; }
+.cal-btn {
+  flex: 1; padding: 4px 0; border-radius: 5px; border: 1.5px solid var(--border); background: #fff;
+  font-size: 11px; font-weight: 700; cursor: pointer; color: var(--text-muted); transition: all .12s;
+}
+.cal-btn:disabled { cursor: not-allowed; opacity: .75; }
+.cal-btn.cal-present.active { background: var(--success, #16a34a); color: #fff; border-color: var(--success, #16a34a); }
+.cal-btn.cal-absent.active { background: var(--danger); color: #fff; border-color: var(--danger); }
+.cal-day-off { background: var(--bg, #f3f4f6); border-style: dashed; align-items: center; }
+.cal-day-off .cal-day-num { color: var(--text-faint); }
+.cal-day-off-label { font-size: 10px; color: var(--text-faint); text-align: center; font-weight: 600; }
+@media (max-width: 640px) {
+  .cal-day { min-height: 60px; padding: 4px; }
+  .cal-btn { font-size: 10px; padding: 3px 0; }
+}
+</style>
+{% endblock %}

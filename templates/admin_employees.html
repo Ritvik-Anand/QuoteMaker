@@ -1,0 +1,147 @@
+{% extends "base.html" %}
+{% block title %}Employees{% endblock %}
+{% block content %}
+<div class="page-header">
+  <h1>Employees</h1>
+  <button class="btn btn-primary" onclick="showAddEmployee()">+ Add Employee</button>
+</div>
+
+<div class="stats-grid" id="emp-stats">
+  <div class="stat-card">
+    <div class="stat-value" id="stat-active">—</div>
+    <div class="stat-label">Active Employees</div>
+  </div>
+  <div class="stat-card">
+    <div class="stat-value" id="stat-payroll">—</div>
+    <div class="stat-label">Total Monthly Payroll</div>
+  </div>
+</div>
+
+<div class="card">
+  <div class="table-wrap">
+  <table class="data-table">
+    <thead>
+      <tr><th>Name</th><th>Monthly Salary</th><th>Status</th><th>Actions</th></tr>
+    </thead>
+    <tbody id="emp-tbody">
+      <tr><td colspan="4" class="empty-state">Loading…</td></tr>
+    </tbody>
+  </table>
+  </div>
+</div>
+
+<div id="modal-employee" class="modal hidden">
+  <div class="modal-box">
+    <div class="modal-header">
+      <h3 id="emp-modal-title">Add Employee</h3>
+      <button class="btn-icon" onclick="closeModal('modal-employee')">✕</button>
+    </div>
+    <div style="display:flex;flex-direction:column;gap:12px;margin-top:8px">
+      <div class="form-group">
+        <label>Name</label>
+        <input type="text" id="emp-name" class="input" placeholder="e.g. Rahul Sharma" autocomplete="off"/>
+      </div>
+      <div class="form-group">
+        <label>Monthly Salary (₹)</label>
+        <input type="number" id="emp-salary" class="input" placeholder="e.g. 25000" min="0" step="0.01"/>
+      </div>
+      <label class="checkbox-label" id="emp-active-row" style="display:none">
+        <input type="checkbox" id="emp-active"/>
+        <span>Active</span>
+      </label>
+    </div>
+    <div id="emp-error" class="error-banner" style="display:none;margin-top:10px"></div>
+    <div class="modal-actions" style="margin-top:16px">
+      <button class="btn btn-outline" onclick="closeModal('modal-employee')">Cancel</button>
+      <button class="btn btn-primary" onclick="saveEmployee()">Save</button>
+    </div>
+  </div>
+</div>
+{% endblock %}
+{% block scripts %}
+<script>
+let editEmployeeId = null;
+
+async function loadEmployees() {
+  const employees = await fetch('/api/employees').then(r => r.json());
+  const active = employees.filter(e => e.active);
+  document.getElementById('stat-active').textContent = active.length;
+  document.getElementById('stat-payroll').textContent =
+    '₹' + active.reduce((s, e) => s + Number(e.monthly_salary), 0).toLocaleString('en-IN', {maximumFractionDigits: 0});
+
+  const tbody = document.getElementById('emp-tbody');
+  if (!employees.length) {
+    tbody.innerHTML = '<tr><td colspan="4" class="empty-state">No employees yet — add your first one.</td></tr>';
+    return;
+  }
+  tbody.innerHTML = employees.map(e => `
+    <tr>
+      <td><strong>${esc(e.name)}</strong></td>
+      <td>₹${Number(e.monthly_salary).toLocaleString('en-IN', {minimumFractionDigits: 2})}</td>
+      <td><span class="badge ${e.active ? '' : 'badge-admin'}">${e.active ? 'Active' : 'Inactive'}</span></td>
+      <td class="actions-cell">
+        <button class="btn btn-sm" onclick='showEditEmployee(${JSON.stringify(e)})'>Edit</button>
+        <button class="btn btn-sm btn-danger" onclick="deleteEmployee(${e.id}, '${esc(e.name)}')">Delete</button>
+      </td>
+    </tr>
+  `).join('');
+}
+
+function showAddEmployee() {
+  editEmployeeId = null;
+  document.getElementById('emp-modal-title').textContent = 'Add Employee';
+  document.getElementById('emp-name').value = '';
+  document.getElementById('emp-salary').value = '';
+  document.getElementById('emp-active-row').style.display = 'none';
+  document.getElementById('emp-error').style.display = 'none';
+  showModal('modal-employee');
+  setTimeout(() => document.getElementById('emp-name').focus(), 100);
+}
+
+function showEditEmployee(e) {
+  editEmployeeId = e.id;
+  document.getElementById('emp-modal-title').textContent = 'Edit Employee';
+  document.getElementById('emp-name').value = e.name;
+  document.getElementById('emp-salary').value = e.monthly_salary;
+  document.getElementById('emp-active-row').style.display = 'flex';
+  document.getElementById('emp-active').checked = !!e.active;
+  document.getElementById('emp-error').style.display = 'none';
+  showModal('modal-employee');
+}
+
+async function saveEmployee() {
+  const name = document.getElementById('emp-name').value.trim();
+  const monthly_salary = document.getElementById('emp-salary').value;
+  const errEl = document.getElementById('emp-error');
+  errEl.style.display = 'none';
+
+  const body = { name, monthly_salary };
+  let url = '/api/employees', method = 'POST';
+  if (editEmployeeId) {
+    url = `/api/employees/${editEmployeeId}`;
+    method = 'PUT';
+    body.active = document.getElementById('emp-active').checked;
+  }
+  const r = await fetch(url, {method, headers: {'Content-Type': 'application/json'}, body: JSON.stringify(body)});
+  const data = await r.json();
+  if (data.error) {
+    errEl.textContent = data.error;
+    errEl.style.display = '';
+    return;
+  }
+  closeModal('modal-employee');
+  loadEmployees();
+}
+
+async function deleteEmployee(id, name) {
+  if (!confirm(`Delete "${name}"? This also deletes all their attendance and payroll history.`)) return;
+  const r = await fetch(`/api/employees/${id}`, {method: 'DELETE'});
+  const data = await r.json();
+  if (data.error) { alert(data.error); return; }
+  loadEmployees();
+}
+
+function esc(s) { return String(s||'').replace(/&/g,'&amp;').replace(/"/g,'&quot;').replace(/</g,'&lt;'); }
+loadEmployees();
+</script>
+{% endblock %}

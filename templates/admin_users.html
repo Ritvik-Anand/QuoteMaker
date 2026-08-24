@@ -52,6 +52,13 @@
         <input type="checkbox" id="new-is-admin" />
         <span>Admin (can manage users and suppliers)</span>
       </label>
+      <div class="form-group">
+        <label>Role (optional, for non-admins)</label>
+        <select id="new-role" class="input">
+          <option value="staff">Staff</option>
+          <option value="ops">Attendance & Payroll</option>
+        </select>
+      </div>
     </div>
     <div id="add-user-error" class="error-banner" style="display:none;margin-top:10px"></div>
     <div class="modal-actions" style="margin-top:16px">
@@ -111,7 +118,14 @@ async function loadUsers() {
           <strong>${esc(u.username)}</strong>
         </div>
       </td>
-      <td><span class="badge ${u.is_admin ? 'badge-admin' : ''}">${u.is_admin ? 'Admin' : 'Staff'}</span></td>
+      <td>
+        ${u.is_admin
+          ? '<span class="badge badge-admin">Admin</span>'
+          : `<select class="input-sm" onchange="setUserRole(${u.id}, this.value)">
+              <option value="staff" ${u.role === 'staff' || !u.role ? 'selected' : ''}>Staff</option>
+              <option value="ops" ${u.role === 'ops' ? 'selected' : ''}>Attendance & Payroll</option>
+            </select>`}
+      </td>
       <td>
         ${u.quote_count ? `<a href="/history?user=${encodeURIComponent(u.username)}" class="link-sm">${u.quote_count} quote${u.quote_count === 1 ? '' : 's'} →</a>` : '<span style="color:var(--text-faint)">None yet</span>'}
       </td>
@@ -128,6 +142,7 @@ function showAddUser() {
   document.getElementById('new-username').value = '';
   document.getElementById('new-password').value = '';
   document.getElementById('new-is-admin').checked = false;
+  document.getElementById('new-role').value = 'staff';
   document.getElementById('add-user-error').style.display = 'none';
   showModal('modal-add-user');
   setTimeout(() => document.getElementById('new-username').focus(), 100);
@@ -137,11 +152,12 @@ async function addUser() {
   const username = document.getElementById('new-username').value.trim();
   const password = document.getElementById('new-password').value;
   const is_admin = document.getElementById('new-is-admin').checked;
+  const role = document.getElementById('new-role').value;
   const errEl = document.getElementById('add-user-error');
   errEl.style.display = 'none';
   const r = await fetch('/api/admin/users', {
     method: 'POST', headers: {'Content-Type': 'application/json'},
-    body: JSON.stringify({username, password, is_admin})
+    body: JSON.stringify({username, password, is_admin, role})
   });
   const data = await r.json();
   if (data.error) {
@@ -159,6 +175,16 @@ async function deleteUser(id, name) {
   const data = await r.json();
   if (data.error) { alert(data.error); return; }
   loadUsers();
+}
+
+async function setUserRole(id, role) {
+  const r = await fetch(`/api/admin/users/${id}/role`, {
+    method: 'PUT', headers: {'Content-Type': 'application/json'},
+    body: JSON.stringify({role})
+  });
+  const data = await r.json();
+  if (data.error) { alert(data.error); loadUsers(); return; }
+  showToast('Role updated');
 }
 
 function showResetPw(id, name) {

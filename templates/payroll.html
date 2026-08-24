@@ -1,0 +1,175 @@
+{% extends "base.html" %}
+{% block title %}Payroll{% endblock %}
+{% block content %}
+<div class="page-header">
+  <h1>Payroll</h1>
+  <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap">
+    <select id="pr-month" class="input" style="max-width:150px" onchange="loadPayroll()"></select>
+    <input type="number" id="pr-year" class="input" style="max-width:100px" onchange="loadPayroll()"/>
+    {% if session.is_admin %}
+    <button class="btn btn-outline" onclick="generatePayroll()">Generate / Refresh</button>
+    <button class="btn btn-primary" onclick="finalizePayroll()">Finalize & Send to Accountant</button>
+    {% endif %}
+  </div>
+</div>
+
+<div class="stats-grid" id="pr-stats">
+  <div class="stat-card">
+    <div class="stat-value" id="pr-stat-count">—</div>
+    <div class="stat-label">Employees in Period</div>
+  </div>
+  <div class="stat-card">
+    <div class="stat-value" id="pr-stat-computed">—</div>
+    <div class="stat-label">Total Computed Pay</div>
+  </div>
+  <div class="stat-card">
+    <div class="stat-value" id="pr-stat-final">—</div>
+    <div class="stat-label">Total Final Pay</div>
+  </div>
+</div>
+
+<div class="card">
+  <div class="table-wrap">
+  <table class="data-table">
+    <thead>
+      <tr>
+        <th>Employee</th>
+        <th>Salary</th>
+        <th>Present</th>
+        <th>Absent</th>
+        <th>Unmarked</th>
+        <th>Computed Pay</th>
+        <th>Final Pay</th>
+        <th>Status</th>
+        <th>Actions</th>
+      </tr>
+    </thead>
+    <tbody id="pr-tbody">
+      <tr><td colspan="9" class="empty-state">Loading…</td></tr>
+    </tbody>
+  </table>
+  </div>
+</div>
+{% endblock %}
+{% block scripts %}
+<script>
+const IS_ADMIN = {{ 'true' if session.is_admin else 'false' }};
+const MONTH_NAMES = ['January','February','March','April','May','June','July','August','September','October','November','December'];
+
+function initPeriodSelectors() {
+  const now = new Date();
+  const monthSel = document.getElementById('pr-month');
+  monthSel.innerHTML = MONTH_NAMES.map((m, i) => `<option value="${i+1}">${m}</option>`).join('');
+  monthSel.value = now.getMonth() + 1;
+  document.getElementById('pr-year').value = now.getFullYear();
+}
+
+function fmtMoney(n) {
+  return '₹' + Number(n).toLocaleString('en-IN', {minimumFractionDigits: 2, maximumFractionDigits: 2});
+}
+
+const STATUS_LABEL = {draft: 'Draft', finalized: 'Sent to Accountant', paid: 'Paid'};
+const STATUS_CLASS = {draft: '', finalized: 'badge-admin', paid: ''};
+
+async function loadPayroll() {
+  const year = document.getElementById('pr-year').value;
+  const month = document.getElementById('pr-month').value;
+  const rows = await fetch(`/api/payroll?year=${year}&month=${month}`).then(r => r.json());
+
+  document.getElementById('pr-stat-count').textContent = rows.length;
+  document.getElementById('pr-stat-computed').textContent = fmtMoney(rows.reduce((s, r) => s + Number(r.computed_pay), 0));
+  document.getElementById('pr-stat-final').textContent = fmtMoney(rows.reduce((s, r) => s + Number(r.final_pay), 0));
+
+  const tbody = document.getElementById('pr-tbody');
+  if (!rows.length) {
+    tbody.innerHTML = `<tr><td colspan="9" class="empty-state">${IS_ADMIN ? 'No payroll generated for this period yet — click "Generate / Refresh".' : 'Nothing sent to you for this period yet.'}</td></tr>`;
+    return;
+  }
+  tbody.innerHTML = rows.map(r => {
+    const unmarked = r.calendar_days - r.present_days - r.absent_days;
+    const editable = IS_ADMIN && r.status === 'draft';
+    const finalPayCell = editable
+      ? `<input type="number" class="input-sm" style="width:110px" value="${r.final_pay}" data-pid="${r.id}" onblur="saveFinalPay(${r.id}, this.value)"/>`
+      : fmtMoney(r.final_pay);
+    const actions = [];
+    if (IS_ADMIN && r.status === 'finalized') {
+      actions.push(`<button class="btn btn-sm btn-outline" onclick="revertPayroll(${r.id})">Revert to Draft</button>`);
+    }
+    if (r.status === 'finalized') {
+      actions.push(`<button class="btn btn-sm btn-primary" onclick="markPaid(${r.id})">Mark Paid</button>`);
+    }
+    return `
+      <tr>
+        <td><strong>${esc(r.employee_name)}</strong></td>
+        <td>${fmtMoney(r.monthly_salary)}</td>
+        <td>${r.present_days}</td>
+        <td>${r.absent_days}</td>
+        <td>${unmarked > 0 ? `<span style="color:var(--text-muted)">${unmarked}</span>` : '0'}</td>
+        <td>${fmtMoney(r.computed_pay)}</td>
+        <td>${finalPayCell}</td>
+        <td><span class="badge ${STATUS_CLASS[r.status] || ''}">${STATUS_LABEL[r.status] || r.status}</span></td>
+        <td class="actions-cell">${actions.join('') || '—'}</td>
+      </tr>
+    `;
+  }).join('');
+}
+
+async function generatePayroll() {
+  const year = document.getElementById('pr-year').value;
+  const month = document.getElementById('pr-month').value;
+  const r = await fetch('/api/payroll/generate', {
+    method: 'POST', headers: {'Content-Type': 'application/json'},
+    body: JSON.stringify({year: Number(year), month: Number(month)})
+  });
+  const data = await r.json();
+  if (data.error) { alert(data.error); return; }
+  loadPayroll();
+}
+
+async function saveFinalPay(pid, value) {
+  const final_pay = Number(value);
+  if (isNaN(final_pay) || final_pay < 0) { alert('Enter a valid amount'); loadPayroll(); return; }
+  const r = await fetch(`/api/payroll/${pid}`, {
+    method: 'PUT', headers: {'Content-Type': 'application/json'},
+    body: JSON.stringify({final_pay})
+  });
+  const data = await r.json();
+  if (data.error) { alert(data.error); loadPayroll(); return; }
+  loadPayroll();
+}
+
+async function finalizePayroll() {
+  const year = document.getElementById('pr-year').value;
+  const month = document.getElementById('pr-month').value;
+  if (!confirm(`Send all draft payroll for ${MONTH_NAMES[month-1]} ${year} to the accountant? You won't be able to edit amounts after this unless you revert them.`)) return;
+  const r = await fetch('/api/payroll/finalize', {
+    method: 'POST', headers: {'Content-Type': 'application/json'},
+    body: JSON.stringify({year: Number(year), month: Number(month)})
+  });
+  const data = await r.json();
+  if (data.error) { alert(data.error); return; }
+  showToast('Sent to accountant');
+  loadPayroll();
+}
+
+async function revertPayroll(pid) {
+  const r = await fetch(`/api/payroll/${pid}/revert`, {method: 'POST'});
+  const data = await r.json();
+  if (data.error) { alert(data.error); return; }
+  loadPayroll();
+}
+
+async function markPaid(pid) {
+  if (!confirm('Mark this as paid?')) return;
+  const r = await fetch(`/api/payroll/${pid}/mark-paid`, {method: 'POST'});
+  const data = await r.json();
+  if (data.error) { alert(data.error); return; }
+  showToast('Marked as paid');
+  loadPayroll();
+}
+
+function esc(s) { return String(s||'').replace(/&/g,'&amp;').replace(/"/g,'&quot;').replace(/</g,'&lt;'); }
+initPeriodSelectors();
+loadPayroll();
+</script>
+{% endblock %}

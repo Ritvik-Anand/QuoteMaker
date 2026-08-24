@@ -23,7 +23,11 @@ if _env.exists():
 from database import init_db, get_db
 from pdf_parser import parse_catalog_pdf
 from export import generate_pdf, generate_excel
-from auth import login_required, admin_required, verify_user, create_user, change_password
+from auth import (
+    login_required, admin_required, marker_required, payroll_viewer_required,
+    verify_user, create_user, change_password,
+)
+import calendar
 
 app = Flask(__name__)
 app.secret_key = os.environ.get("SECRET_KEY", secrets.token_hex(32))
@@ -74,6 +78,7 @@ def login_post():
     session["user_id"] = user["id"]
     session["username"] = user["username"]
     session["is_admin"] = bool(user["is_admin"])
+    session["role"] = user.get("role") or "staff"
     next_url = request.args.get("next") or url_for("index")
     return redirect(next_url)
 
@@ -111,12 +116,15 @@ def admin_users_page():
     return render_template("admin_users.html")
 
 
+_VALID_ROLES = {"staff", "ops"}
+
+
 @app.route("/api/admin/users", methods=["GET"])
 @admin_required
 def api_list_users():
     conn = get_db()
     rows = conn.execute(
-        "SELECT u.id, u.username, u.is_admin, u.created_at, "
+        "SELECT u.id, u.username, u.is_admin, u.role, u.created_at, "
         "(SELECT COUNT(*) FROM quotations q WHERE q.created_by = u.username) as quote_count "
         "FROM users u ORDER BY u.id"
     ).fetchall()
@@ -131,14 +139,31 @@ def api_create_user():
     username = (data.get("username") or "").strip()
     password = (data.get("password") or "").strip()
     is_admin = bool(data.get("is_admin", False))
+    role = (data.get("role") or "staff").strip()
+    if role not in _VALID_ROLES:
+        role = "staff"
     if not username or not password:
         return jsonify({"error": "Username and password required"}), 400
     if len(password) < 6:
         return jsonify({"error": "Password must be at least 6 characters"}), 400
     try:
-        create_user(username, password, is_admin)
+        create_user(username, password, is_admin, role)
     except Exception as e:
         return jsonify({"error": str(e)}), 400
+    return jsonify({"ok": True})
+
+
+@app.route("/api/admin/users/<int:uid>/role", methods=["PUT"])
+@admin_required
+def api_set_user_role(uid):
+    data = request.json
+    role = (data.get("role") or "staff").strip()
+    if role not in _VALID_ROLES:
+        return jsonify({"error": "Invalid role"}), 400
+    conn = get_db()
+    conn.execute("UPDATE users SET role = ? WHERE id = ?", (role, uid))
+    conn.commit()
+    conn.close()
     return jsonify({"ok": True})
 
 
@@ -195,6 +220,24 @@ def edit_quotation_page(qid):
 @login_required
 def history_page():
     return render_template("history.html")
+
+
+@app.route("/attendance")
+@marker_required
+def attendance_page():
+    return render_template("attendance.html")
+
+
+@app.route("/payroll")
+@payroll_viewer_required
+def payroll_page():
+    return render_template("payroll.html")
+
+
+@app.route("/admin/employees")
+@admin_required
+def admin_employees_page():
+    return render_template("admin_employees.html")
 
 
 # ── Suppliers API ──────────────────────────────────────────────────────────────
@@ -698,6 +741,355 @@ def export_excel(qid):
     return send_file(io.BytesIO(xl_bytes),
                      mimetype="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
                      as_attachment=True, download_name=f"{q['quote_number']}.xlsx")
+
+
+# ── Employees API ──────────────────────────────────────────────────────────────
+
+@app.route("/api/employees", methods=["GET"])
+@login_required
+def get_employees():
+    # Readable by any logged-in user — the attendance marker needs the roster
+    # to mark attendance, and payroll viewers need names/salaries. Writes below
+    # are admin-only.
+    conn = get_db()
+    rows = conn.execute("SELECT * FROM employees ORDER BY active DESC, name").fetchall()
+    conn.close()
+    return jsonify(rows)
+
+
+@app.route("/api/employees", methods=["POST"])
+@admin_required
+def create_employee():
+    data = request.json
+    name = (data.get("name") or "").strip()
+    try:
+        salary = float(data.get("monthly_salary"))
+    except (TypeError, ValueError):
+        return jsonify({"error": "Invalid monthly salary"}), 400
+    if not name:
+        return jsonify({"error": "Name required"}), 400
+    if salary <= 0:
+        return jsonify({"error": "Monthly salary must be greater than 0"}), 400
+    conn = get_db()
+    eid = conn.insert(
+        "INSERT INTO employees (name, monthly_salary) VALUES (?,?)", (name, salary)
+    )
+    conn.commit()
+    conn.close()
+    return jsonify({"ok": True, "id": eid})
+
+
+@app.route("/api/employees/<int:eid>", methods=["PUT"])
+@admin_required
+def update_employee(eid):
+    data = request.json
+    name = (data.get("name") or "").strip()
+    try:
+        salary = float(data.get("monthly_salary"))
+    except (TypeError, ValueError):
+        return jsonify({"error": "Invalid monthly salary"}), 400
+    if not name:
+        return jsonify({"error": "Name required"}), 400
+    if salary <= 0:
+        return jsonify({"error": "Monthly salary must be greater than 0"}), 400
+    active = 1 if data.get("active", True) else 0
+    conn = get_db()
+    conn.execute(
+        "UPDATE employees SET name=?, monthly_salary=?, active=? WHERE id=?",
+        (name, salary, active, eid)
+    )
+    conn.commit()
+    conn.close()
+    return jsonify({"ok": True})
+
+
+@app.route("/api/employees/<int:eid>", methods=["DELETE"])
+@admin_required
+def delete_employee(eid):
+    conn = get_db()
+    conn.execute("DELETE FROM employees WHERE id=?", (eid,))
+    conn.commit()
+    conn.close()
+    return jsonify({"ok": True})
+
+
+# ── Attendance API ─────────────────────────────────────────────────────────────
+
+@app.route("/api/attendance/calendar", methods=["GET"])
+@marker_required
+def get_attendance_calendar():
+    try:
+        eid = int(request.args.get("employee_id"))
+        year = int(request.args.get("year"))
+        month = int(request.args.get("month"))
+    except (TypeError, ValueError):
+        return jsonify({"error": "Invalid employee_id/year/month"}), 400
+    if not (1 <= month <= 12):
+        return jsonify({"error": "Invalid month"}), 400
+
+    conn = get_db()
+    emp = conn.execute("SELECT * FROM employees WHERE id=?", (eid,)).fetchone()
+    if not emp:
+        conn.close()
+        return jsonify({"error": "Employee not found"}), 404
+
+    prefix = f"{year:04d}-{month:02d}-"
+    marked = {
+        r["date"]: r["status"]
+        for r in conn.execute(
+            "SELECT date, status FROM attendance WHERE employee_id=? AND date LIKE ?",
+            (eid, prefix + "%")
+        ).fetchall()
+    }
+    conn.close()
+
+    cal_days = calendar.monthrange(year, month)[1]
+    is_admin = bool(session.get("is_admin"))
+    today = date.today()
+    days = []
+    for d in range(1, cal_days + 1):
+        date_str = f"{prefix}{d:02d}"
+        day_date = date(year, month, d)
+        status = marked.get(date_str)
+        is_sunday = day_date.weekday() == 6
+        is_future = day_date > today
+        # Sundays and days that haven't happened yet are never markable by
+        # anyone, admin included — there's nothing to correct, so this isn't
+        # the same "only an admin can fix it" lock as an already-marked day.
+        off_limits = is_sunday or is_future
+        # A day nobody's admin has already marked is locked for a non-admin
+        # marker — they can set it once, but only an admin can correct a
+        # mistake after the fact, so an attendance record can't quietly
+        # drift after the fact without an admin's say-so.
+        locked = off_limits or (bool(status) and not is_admin)
+        days.append({
+            "date": date_str, "status": status, "locked": locked,
+            "is_sunday": is_sunday, "is_future": is_future,
+        })
+
+    return jsonify({
+        "employee_id": eid, "employee_name": emp["name"],
+        "year": year, "month": month, "days": days
+    })
+
+
+@app.route("/api/attendance/mark", methods=["POST"])
+@marker_required
+def mark_attendance_day():
+    data = request.json
+    try:
+        eid = int(data.get("employee_id"))
+    except (TypeError, ValueError):
+        return jsonify({"error": "Invalid employee_id"}), 400
+    date_str = (data.get("date") or "").strip()
+    status = data.get("status")
+    if status not in ("present", "absent"):
+        return jsonify({"error": "Status must be present or absent"}), 400
+    if not date_str:
+        return jsonify({"error": "Date required"}), 400
+    try:
+        day_date = date.fromisoformat(date_str)
+    except ValueError:
+        return jsonify({"error": "Invalid date"}), 400
+    if day_date.weekday() == 6:
+        return jsonify({"error": "Sundays aren't markable"}), 400
+    if day_date > date.today():
+        return jsonify({"error": "Can't mark attendance for a day that hasn't happened yet"}), 400
+
+    conn = get_db()
+    existing = conn.execute(
+        "SELECT * FROM attendance WHERE employee_id=? AND date=?", (eid, date_str)
+    ).fetchone()
+    if existing and not session.get("is_admin"):
+        conn.close()
+        return jsonify({"error": "This day is already marked — only an admin can change it"}), 403
+
+    conn.execute(
+        "INSERT INTO attendance (employee_id, date, status, marked_by) VALUES (?,?,?,?) "
+        "ON CONFLICT (employee_id, date) DO UPDATE SET "
+        "status = excluded.status, marked_by = excluded.marked_by, marked_at = CURRENT_TIMESTAMP",
+        (eid, date_str, status, session["username"])
+    )
+    conn.commit()
+    conn.close()
+    return jsonify({"ok": True, "status": status})
+
+
+# ── Payroll API ────────────────────────────────────────────────────────────────
+# Deduction per absent day = monthly_salary / calendar_days_in_month, so it
+# self-adjusts for shorter/longer months (Feb vs a 31-day month) rather than
+# using a fixed divisor. Only days explicitly marked "absent" count against
+# pay — a day nobody marked is neither charged nor assumed worked, and shows
+# up as "unmarked" so the admin can see gaps before finalizing, rather than
+# the deduction silently guessing at a policy nobody specified.
+
+@app.route("/api/payroll/generate", methods=["POST"])
+@admin_required
+def generate_payroll():
+    data = request.json
+    try:
+        year = int(data.get("year"))
+        month = int(data.get("month"))
+    except (TypeError, ValueError):
+        return jsonify({"error": "Invalid year/month"}), 400
+    if not (1 <= month <= 12):
+        return jsonify({"error": "Invalid month"}), 400
+
+    conn = get_db()
+    employees = conn.execute("SELECT * FROM employees WHERE active = 1 ORDER BY name").fetchall()
+    cal_days = calendar.monthrange(year, month)[1]
+    prefix = f"{year:04d}-{month:02d}-"
+
+    for emp in employees:
+        existing = conn.execute(
+            "SELECT * FROM payroll WHERE employee_id=? AND year=? AND month=?",
+            (emp["id"], year, month)
+        ).fetchone()
+        # Never silently overwrite a period the admin already sent to the
+        # accountant or that's already been paid out.
+        if existing and existing["status"] != "draft":
+            continue
+
+        present = conn.execute(
+            "SELECT COUNT(*) as n FROM attendance WHERE employee_id=? AND date LIKE ? AND status='present'",
+            (emp["id"], prefix + "%")
+        ).fetchone()["n"]
+        absent = conn.execute(
+            "SELECT COUNT(*) as n FROM attendance WHERE employee_id=? AND date LIKE ? AND status='absent'",
+            (emp["id"], prefix + "%")
+        ).fetchone()["n"]
+        salary = emp["monthly_salary"]
+        deduction = (salary / cal_days) * absent
+        computed = round(salary - deduction, 2)
+
+        if existing:
+            # Recompute from attendance, but never touch final_pay here — if
+            # the admin already typed in an override, a routine re-generate
+            # (e.g. after a late attendance correction) must not silently
+            # wipe it out. The admin sees computed_pay change and decides.
+            conn.execute(
+                "UPDATE payroll SET monthly_salary=?, calendar_days=?, present_days=?, "
+                "absent_days=?, computed_pay=?, generated_at=CURRENT_TIMESTAMP WHERE id=?",
+                (salary, cal_days, present, absent, computed, existing["id"])
+            )
+        else:
+            conn.insert(
+                "INSERT INTO payroll (employee_id, year, month, monthly_salary, calendar_days, "
+                "present_days, absent_days, computed_pay, final_pay) VALUES (?,?,?,?,?,?,?,?,?)",
+                (emp["id"], year, month, salary, cal_days, present, absent, computed, computed)
+            )
+    conn.commit()
+    conn.close()
+    return jsonify({"ok": True})
+
+
+@app.route("/api/payroll", methods=["GET"])
+@payroll_viewer_required
+def list_payroll():
+    year = request.args.get("year")
+    month = request.args.get("month")
+    conn = get_db()
+    where, params = [], []
+    if year:
+        where.append("p.year = ?"); params.append(int(year))
+    if month:
+        where.append("p.month = ?"); params.append(int(month))
+    # Non-admins (accountant role) only ever see periods actually sent to
+    # them — a draft is the admin's own working copy, not payroll-queue data.
+    if not session.get("is_admin"):
+        where.append("p.status IN ('finalized','paid')")
+    sql = "SELECT p.*, e.name as employee_name FROM payroll p JOIN employees e ON e.id = p.employee_id "
+    if where:
+        sql += "WHERE " + " AND ".join(where) + " "
+    sql += "ORDER BY e.name"
+    rows = conn.execute(sql, params).fetchall()
+    conn.close()
+    return jsonify(rows)
+
+
+@app.route("/api/payroll/<int:pid>", methods=["PUT"])
+@admin_required
+def update_payroll(pid):
+    data = request.json
+    conn = get_db()
+    row = conn.execute("SELECT * FROM payroll WHERE id=?", (pid,)).fetchone()
+    if not row:
+        conn.close()
+        return jsonify({"error": "Not found"}), 404
+    if row["status"] != "draft":
+        conn.close()
+        return jsonify({"error": "Only draft payroll can be edited — revert it to draft first"}), 400
+    try:
+        final_pay = float(data.get("final_pay"))
+    except (TypeError, ValueError):
+        conn.close()
+        return jsonify({"error": "Invalid final pay"}), 400
+    if final_pay < 0:
+        conn.close()
+        return jsonify({"error": "Final pay cannot be negative"}), 400
+    conn.execute("UPDATE payroll SET final_pay=? WHERE id=?", (final_pay, pid))
+    conn.commit()
+    conn.close()
+    return jsonify({"ok": True})
+
+
+@app.route("/api/payroll/finalize", methods=["POST"])
+@admin_required
+def finalize_payroll():
+    data = request.json
+    try:
+        year = int(data.get("year"))
+        month = int(data.get("month"))
+    except (TypeError, ValueError):
+        return jsonify({"error": "Invalid year/month"}), 400
+    conn = get_db()
+    conn.execute(
+        "UPDATE payroll SET status='finalized', finalized_by=?, finalized_at=CURRENT_TIMESTAMP "
+        "WHERE year=? AND month=? AND status='draft'",
+        (session["username"], year, month)
+    )
+    conn.commit()
+    conn.close()
+    return jsonify({"ok": True})
+
+
+@app.route("/api/payroll/<int:pid>/revert", methods=["POST"])
+@admin_required
+def revert_payroll(pid):
+    conn = get_db()
+    row = conn.execute("SELECT * FROM payroll WHERE id=?", (pid,)).fetchone()
+    if not row:
+        conn.close()
+        return jsonify({"error": "Not found"}), 404
+    if row["status"] == "paid":
+        conn.close()
+        return jsonify({"error": "Already marked paid — cannot revert"}), 400
+    conn.execute(
+        "UPDATE payroll SET status='draft', finalized_by='', finalized_at=NULL WHERE id=?", (pid,)
+    )
+    conn.commit()
+    conn.close()
+    return jsonify({"ok": True})
+
+
+@app.route("/api/payroll/<int:pid>/mark-paid", methods=["POST"])
+@payroll_viewer_required
+def mark_payroll_paid(pid):
+    conn = get_db()
+    row = conn.execute("SELECT * FROM payroll WHERE id=?", (pid,)).fetchone()
+    if not row:
+        conn.close()
+        return jsonify({"error": "Not found"}), 404
+    if row["status"] != "finalized":
+        conn.close()
+        return jsonify({"error": "Only finalized payroll can be marked paid"}), 400
+    conn.execute(
+        "UPDATE payroll SET status='paid', paid_by=?, paid_at=CURRENT_TIMESTAMP WHERE id=?",
+        (session["username"], pid)
+    )
+    conn.commit()
+    conn.close()
+    return jsonify({"ok": True})
 
 
 # Runs on import so it also fires under Vercel's serverless WSGI handler

@@ -143,6 +143,41 @@ CREATE TABLE IF NOT EXISTS quotation_items (
     sort_order       INTEGER DEFAULT 0,
     supplier_name    TEXT DEFAULT ''
 );
+CREATE TABLE IF NOT EXISTS employees (
+    id             INTEGER PRIMARY KEY AUTOINCREMENT,
+    name           TEXT NOT NULL,
+    monthly_salary REAL NOT NULL DEFAULT 0,
+    active         INTEGER DEFAULT 1,
+    created_at     TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+CREATE TABLE IF NOT EXISTS attendance (
+    id          INTEGER PRIMARY KEY AUTOINCREMENT,
+    employee_id INTEGER NOT NULL REFERENCES employees(id) ON DELETE CASCADE,
+    date        TEXT NOT NULL,
+    status      TEXT NOT NULL DEFAULT 'absent',
+    marked_by   TEXT DEFAULT '',
+    marked_at   TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    UNIQUE(employee_id, date)
+);
+CREATE TABLE IF NOT EXISTS payroll (
+    id             INTEGER PRIMARY KEY AUTOINCREMENT,
+    employee_id    INTEGER NOT NULL REFERENCES employees(id) ON DELETE CASCADE,
+    year           INTEGER NOT NULL,
+    month          INTEGER NOT NULL,
+    monthly_salary REAL NOT NULL,
+    calendar_days  INTEGER NOT NULL,
+    present_days   INTEGER NOT NULL DEFAULT 0,
+    absent_days    INTEGER NOT NULL DEFAULT 0,
+    computed_pay   REAL NOT NULL,
+    final_pay      REAL NOT NULL,
+    status         TEXT NOT NULL DEFAULT 'draft',
+    generated_at   TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    finalized_by   TEXT DEFAULT '',
+    finalized_at   TIMESTAMP,
+    paid_by        TEXT DEFAULT '',
+    paid_at        TIMESTAMP,
+    UNIQUE(employee_id, year, month)
+);
 """
 
 _PG_TABLES = [
@@ -204,6 +239,41 @@ _PG_TABLES = [
         sort_order       INTEGER DEFAULT 0,
         supplier_name    TEXT DEFAULT ''
     )""",
+    """CREATE TABLE IF NOT EXISTS employees (
+        id             SERIAL PRIMARY KEY,
+        name           TEXT NOT NULL,
+        monthly_salary REAL NOT NULL DEFAULT 0,
+        active         INTEGER DEFAULT 1,
+        created_at     TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+    )""",
+    """CREATE TABLE IF NOT EXISTS attendance (
+        id          SERIAL PRIMARY KEY,
+        employee_id INTEGER NOT NULL REFERENCES employees(id) ON DELETE CASCADE,
+        date        TEXT NOT NULL,
+        status      TEXT NOT NULL DEFAULT 'absent',
+        marked_by   TEXT DEFAULT '',
+        marked_at   TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        UNIQUE(employee_id, date)
+    )""",
+    """CREATE TABLE IF NOT EXISTS payroll (
+        id             SERIAL PRIMARY KEY,
+        employee_id    INTEGER NOT NULL REFERENCES employees(id) ON DELETE CASCADE,
+        year           INTEGER NOT NULL,
+        month          INTEGER NOT NULL,
+        monthly_salary REAL NOT NULL,
+        calendar_days  INTEGER NOT NULL,
+        present_days   INTEGER NOT NULL DEFAULT 0,
+        absent_days    INTEGER NOT NULL DEFAULT 0,
+        computed_pay   REAL NOT NULL,
+        final_pay      REAL NOT NULL,
+        status         TEXT NOT NULL DEFAULT 'draft',
+        generated_at   TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        finalized_by   TEXT DEFAULT '',
+        finalized_at   TIMESTAMP,
+        paid_by        TEXT DEFAULT '',
+        paid_at        TIMESTAMP,
+        UNIQUE(employee_id, year, month)
+    )""",
 ]
 
 
@@ -217,6 +287,10 @@ _COLUMN_MIGRATIONS = [
     # SQLite forbids non-constant defaults (CURRENT_TIMESTAMP) in ALTER TABLE ADD COLUMN,
     # so this one is added bare and backfilled below.
     ("quotations", "updated_at", "TIMESTAMP"),
+    # 'staff' (default) or 'ops' (can mark attendance and run payroll) — an
+    # admin's is_admin flag already implies full access regardless of this
+    # column, see auth.py's is_ops() helper.
+    ("users", "role", "TEXT DEFAULT 'staff'"),
 ]
 
 
