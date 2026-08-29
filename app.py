@@ -199,7 +199,7 @@ def index():
 
 
 @app.route("/catalogs")
-@login_required
+@admin_required
 def catalogs_page():
     return render_template("catalogs.html")
 
@@ -286,7 +286,7 @@ def get_suppliers():
 
 
 @app.route("/api/suppliers", methods=["POST"])
-@login_required
+@admin_required
 def create_supplier():
     data = request.json
     name = (data.get("name") or "").strip()
@@ -304,7 +304,7 @@ def create_supplier():
 
 
 @app.route("/api/suppliers/<int:sid>", methods=["DELETE"])
-@login_required
+@admin_required
 def delete_supplier(sid):
     conn = get_db()
     conn.execute("DELETE FROM suppliers WHERE id = ?", (sid,))
@@ -316,7 +316,7 @@ def delete_supplier(sid):
 # ── Catalog API ────────────────────────────────────────────────────────────────
 
 @app.route("/api/suppliers/<int:sid>/catalogs", methods=["GET"])
-@login_required
+@admin_required
 def get_catalogs(sid):
     conn = get_db()
     rows = conn.execute(
@@ -359,7 +359,7 @@ def _ingest_catalog(sid, supplier_name, pdf_bytes, catalog_name, catalog_id):
 
 
 @app.route("/api/suppliers/<int:sid>/upload", methods=["POST"])
-@login_required
+@admin_required
 def upload_catalog(sid):
     conn = get_db()
     supplier = conn.execute("SELECT * FROM suppliers WHERE id = ?", (sid,)).fetchone()
@@ -381,7 +381,7 @@ def upload_catalog(sid):
 
 
 @app.route("/api/blob/upload-token", methods=["GET"])
-@login_required
+@admin_required
 def blob_upload_token():
     token = os.environ.get("BLOB_READ_WRITE_TOKEN")
     if not token:
@@ -390,7 +390,7 @@ def blob_upload_token():
 
 
 @app.route("/api/suppliers/<int:sid>/upload-blob", methods=["POST"])
-@login_required
+@admin_required
 def upload_catalog_blob(sid):
     """Companion to upload_catalog() for large PDFs: the browser has already
     PUT the file directly to Vercel Blob (bypassing the ~4.5MB serverless
@@ -434,7 +434,7 @@ def upload_catalog_blob(sid):
 
 
 @app.route("/api/catalogs/<int:cid>", methods=["DELETE"])
-@login_required
+@admin_required
 def delete_catalog(cid):
     conn = get_db()
     conn.execute("DELETE FROM catalogs WHERE id = ?", (cid,))
@@ -589,7 +589,7 @@ def search_items():
 
 
 @app.route("/api/items/<int:iid>", methods=["PUT"])
-@login_required
+@admin_required
 def update_item(iid):
     data = request.json
     conn = get_db()
@@ -603,7 +603,7 @@ def update_item(iid):
 
 
 @app.route("/api/items/<int:iid>", methods=["DELETE"])
-@login_required
+@admin_required
 def delete_item(iid):
     conn = get_db()
     conn.execute("DELETE FROM items WHERE id = ?", (iid,))
@@ -613,7 +613,7 @@ def delete_item(iid):
 
 
 @app.route("/api/suppliers/<int:sid>/items", methods=["GET"])
-@login_required
+@admin_required
 def get_supplier_items(sid):
     conn = get_db()
     rows = conn.execute(

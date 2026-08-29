@@ -20,10 +20,6 @@
     <div class="stat-value" id="ov-margin">—</div>
     <div class="stat-label">Total Margin</div>
   </div>
-  <div class="stat-card">
-    <div class="stat-value" id="ov-margin-pct">—</div>
-    <div class="stat-label">Margin %</div>
-  </div>
 </div>
 {% endif %}
 
@@ -51,7 +47,6 @@ async function loadOverview() {
   document.getElementById('ov-purchase').textContent = '₹' + s.total_purchase.toLocaleString('en-IN', {maximumFractionDigits: 0});
   document.getElementById('ov-sale').textContent = '₹' + s.total_sale.toLocaleString('en-IN', {maximumFractionDigits: 0});
   document.getElementById('ov-margin').textContent = '₹' + s.total_margin.toLocaleString('en-IN', {maximumFractionDigits: 0});
-  document.getElementById('ov-margin-pct').textContent = s.margin_pct.toFixed(1) + '%';
 }
 
 async function loadProjects() {

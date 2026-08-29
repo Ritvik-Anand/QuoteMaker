@@ -25,7 +25,9 @@
     <div class="nav-right">
       <div class="nav-links">
         <a href="/" class="nav-link {% if request.path == '/' %}active{% endif %}">Dashboard</a>
+        {% if session.is_admin %}
         <a href="/catalogs" class="nav-link {% if request.path == '/catalogs' %}active{% endif %}">Catalogs</a>
+        {% endif %}
         <a href="/history" class="nav-link {% if request.path == '/history' %}active{% endif %}">History</a>
         <a href="/projects" class="nav-link {% if request.path.startswith('/projects') %}active{% endif %}">Projects</a>
         <a href="/orders" class="nav-link {% if request.path.startswith('/orders') %}active{% endif %}">Orders</a>
@@ -59,7 +61,9 @@
     </div>
     <div class="mobile-drawer-links">
       <a href="/" class="mobile-drawer-link {% if request.path == '/' %}active{% endif %}">Dashboard</a>
+      {% if session.is_admin %}
       <a href="/catalogs" class="mobile-drawer-link {% if request.path == '/catalogs' %}active{% endif %}">Catalogs</a>
+      {% endif %}
       <a href="/history" class="mobile-drawer-link {% if request.path == '/history' %}active{% endif %}">History</a>
       <a href="/projects" class="mobile-drawer-link {% if request.path.startswith('/projects') %}active{% endif %}">Projects</a>
       <a href="/orders" class="mobile-drawer-link {% if request.path.startswith('/orders') %}active{% endif %}">Orders</a>

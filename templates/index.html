@@ -37,7 +37,9 @@
     <div class="card-header"><h2>Quick Actions</h2></div>
     <div class="quick-actions">
       <a href="/quotation/new" class="btn btn-primary btn-block">+ New Quotation</a>
+      {% if session.is_admin %}
       <a href="/catalogs" class="btn btn-outline btn-block">Manage Catalogs</a>
+      {% endif %}
     </div>
   </div>
 </div>
