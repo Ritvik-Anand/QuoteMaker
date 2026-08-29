@@ -3,10 +3,12 @@
 {% block content %}
 <div class="page-header">
   <div>
-    <h1 id="page-title">New Quotation</h1>
+    <h1><span id="page-title">New Quotation</span> <span class="badge" id="quote-status-badge" style="display:none;vertical-align:middle;margin-left:6px"></span></h1>
     <div class="attribution" id="quote-attribution" style="display:none;margin-top:5px"></div>
   </div>
   <div class="header-actions">
+    <a class="btn btn-outline" id="btn-view-order" style="display:none" href="#">📦 View Order</a>
+    <button class="btn btn-outline" id="btn-accept" style="display:none" onclick="acceptQuotation()">✅ Mark Accepted</button>
     <button class="btn btn-outline" onclick="saveQuotation()">💾 Save</button>
     <div class="share-wrap" id="btn-share" style="display:none">
       <button class="btn btn-outline" onclick="toggleShareMenu(this)">🔗 Share</button>
@@ -181,6 +183,7 @@ async function init() {
     quoteItems = data.items.map(i => ({...i}));
     renderItems();
     updateTotals();
+    updateAcceptUi(q.status, data.order_id);
   } else {
     const nb = await fetch('/api/quotations/next-number').then(r => r.json());
     document.getElementById('quote-number').value = nb.quote_number;
@@ -637,6 +640,36 @@ async function saveQuotation() {
     const err = await r.json();
     alert('Error: ' + (err.error || 'Unknown'));
   }
+}
+
+function updateAcceptUi(status, orderId) {
+  const badge = document.getElementById('quote-status-badge');
+  const acceptBtn = document.getElementById('btn-accept');
+  const viewOrderBtn = document.getElementById('btn-view-order');
+  if (status === 'accepted') {
+    badge.textContent = 'Accepted';
+    badge.className = 'badge badge-success';
+    badge.style.display = '';
+    acceptBtn.style.display = 'none';
+    if (orderId) {
+      viewOrderBtn.href = `/orders/${orderId}`;
+      viewOrderBtn.style.display = '';
+    }
+  } else {
+    badge.style.display = 'none';
+    viewOrderBtn.style.display = 'none';
+    acceptBtn.style.display = quoteItems.length ? '' : 'none';
+  }
+}
+
+async function acceptQuotation() {
+  if (!QID) { alert('Save the quotation first.'); return; }
+  if (!confirm('Mark this quotation as accepted? It will be added to Orders for supply and payment tracking.')) return;
+  const r = await fetch(`/api/quotations/${QID}/accept`, {method: 'POST'});
+  const data = await r.json();
+  if (data.error) { alert(data.error); return; }
+  showToast('Quotation accepted — order created');
+  updateAcceptUi('accepted', data.order_id);
 }
 
 function exportQuote(type) {

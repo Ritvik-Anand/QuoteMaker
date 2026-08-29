@@ -381,6 +381,7 @@ textarea.input { resize: vertical; }
 
 /* ── Admin badge ── */
 .badge-admin { background: var(--warning-light); color: #92400e; }
+.badge-success { background: var(--success-light); color: #065f46; }
 .tag-badge { background: #f3effc; color: #6d3fae; margin: 1px 2px 1px 0; }
 
 /* ── Row overflow menu (⋮) ── */
@@ -411,8 +412,18 @@ textarea.input { resize: vertical; }
 .proj-card-top, .emp-card-top, .pr-card-top { display: flex; align-items: center; justify-content: space-between; gap: 10px; }
 .proj-card-meta, .emp-card-meta { margin-top: 5px; font-size: 12.5px; color: var(--text-muted); }
 .proj-card-actions, .emp-card-actions, .pr-card-actions { display: flex; gap: 8px; flex-wrap: wrap; margin-top: 10px; }
-.pr-card-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 8px 16px; margin-top: 8px; font-size: 13px; }
-.pr-card-label { display: block; font-size: 10.5px; font-weight: 700; color: var(--text-muted); text-transform: uppercase; letter-spacing: .4px; }
+.pr-card-grid, .ord-card-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 8px 16px; margin-top: 8px; font-size: 13px; }
+.pr-card-label, .ord-card-label { display: block; font-size: 10.5px; font-weight: 700; color: var(--text-muted); text-transform: uppercase; letter-spacing: .4px; }
+.ord-cards { display: none; }
+.ord-card { padding: 14px 4px; border-bottom: 1px solid var(--border-soft); }
+.ord-card:last-child { border-bottom: none; }
+.ord-card-top { display: flex; align-items: center; justify-content: space-between; gap: 10px; }
+.ord-card-meta { margin-top: 5px; font-size: 12.5px; color: var(--text-muted); }
+.ord-card-actions { display: flex; gap: 8px; flex-wrap: wrap; margin-top: 10px; }
+
+/* ── Order detail: item supply table + payment add row ── */
+.pay-add-row { display: flex; gap: 8px; flex-wrap: wrap; margin-bottom: 14px; }
+.pay-add-row .input { flex: 1; min-width: 120px; }
 .history-card-footer { display: flex; align-items: center; justify-content: space-between; gap: 10px; margin-top: 8px; }
 .history-card-meta { display: flex; align-items: center; gap: 8px; flex-shrink: 0; }
 
@@ -427,6 +438,11 @@ textarea.input { resize: vertical; }
    scroll of the whole document — wide content scrolls within its own box. */
 html, body { max-width: 100%; overflow-x: hidden; }
 .table-wrap, .items-table-wrap { overflow-x: auto; }
+/* This table is a comparison/tracking list meant to show every row at once —
+   the global 420px max-height (sized for long, scannable desktop tables
+   elsewhere) would silently clip rows once each stacks into a tall mobile
+   card, the same bug fixed for the project editor's makes table. */
+.ord-item-table-wrap { max-height: none; }
 
 @media (max-width: 768px) {
   .quote-layout { flex-direction: column; }
@@ -455,9 +471,22 @@ html, body { max-width: 100%; overflow-x: hidden; }
   .history-table-wrap { display: none; }
   .history-cards { display: block; }
 
-  /* Projects / Employees / Payroll: same table -> card swap. */
-  .proj-table-wrap, .emp-table-wrap, .pr-table-wrap { display: none; }
-  .proj-cards, .emp-cards, .pr-cards { display: block; }
+  /* Projects / Employees / Payroll / Orders: same table -> card swap. */
+  .proj-table-wrap, .emp-table-wrap, .pr-table-wrap, .ord-table-wrap { display: none; }
+  .proj-cards, .emp-cards, .pr-cards, .ord-cards { display: block; }
+
+  /* Order detail's item table: same data-label -> stacked-card technique
+     as the project editor's makes-comparison table, reused rather than a
+     second JS render path for the same numbers. */
+  .ord-item-table thead { display: none; }
+  .ord-item-table, .ord-item-table tbody, .ord-item-table tr, .ord-item-table td { display: block; width: 100%; }
+  .ord-item-table { border: none; }
+  .ord-item-table tr { border: 1.5px solid var(--border-soft); border-radius: 8px; margin-bottom: 10px; padding: 10px 12px; background: #fff; }
+  .ord-item-table td { border: none; border-bottom: 1px dashed var(--border-soft); padding: 7px 0; display: flex; align-items: center; justify-content: space-between; gap: 10px; }
+  .ord-item-table td:last-child { border-bottom: none; padding-top: 10px; justify-content: flex-end; }
+  .ord-item-table td[data-label]::before { content: attr(data-label); font-weight: 700; font-size: 10.5px; color: var(--text-muted); text-transform: uppercase; letter-spacing: .4px; flex-shrink: 0; }
+  .ord-item-table td[data-label="Description"] { flex-direction: column; align-items: flex-start; }
+  .ord-item-table td[data-label="Description"]::before { margin-bottom: 5px; }
 
   /* Any input under 16px makes iOS Safari auto-zoom the whole page on
      focus, which is what made the date field (and everything else) look

@@ -1,0 +1,215 @@
+{% extends "base.html" %}
+{% block title %}Order{% endblock %}
+{% block content %}
+<div class="page-header">
+  <div>
+    <h1 id="page-title">Order <span class="badge" id="ord-status-badge"></span></h1>
+    <div class="attribution" id="ord-quote-link" style="margin-top:5px"></div>
+  </div>
+  <div class="header-actions">
+    <button class="btn btn-primary" onclick="saveOrder()">💾 Save Supply Progress</button>
+  </div>
+</div>
+
+<div class="quote-layout">
+  <div class="quote-main">
+    <div class="card">
+      <h2 class="card-title">Items — Supply Tracking</h2>
+      <div class="table-wrap ord-item-table-wrap">
+        <table class="data-table ord-item-table">
+          <thead>
+            <tr>
+              <th>Description</th>
+              <th style="width:70px">Unit</th>
+              <th style="width:90px">Ordered</th>
+              <th style="width:110px">Supplied</th>
+              <th style="width:100px">Unit ₹</th>
+              <th style="width:100px">Amount ₹</th>
+              <th style="width:90px"></th>
+            </tr>
+          </thead>
+          <tbody id="ord-items-tbody"></tbody>
+        </table>
+      </div>
+    </div>
+
+    <div class="card">
+      <h2 class="card-title">Payments Received</h2>
+      <div class="pay-add-row">
+        <input type="number" id="pay-amount" class="input" placeholder="Amount ₹" min="0" step="0.01" style="max-width:140px"/>
+        <input type="date" id="pay-date" class="input" style="max-width:160px"/>
+        <input type="text" id="pay-note" class="input" placeholder="Note (optional)"/>
+        <button class="btn btn-primary" onclick="addPayment()">+ Add Payment</button>
+      </div>
+      <div class="table-wrap">
+        <table class="data-table">
+          <thead>
+            <tr><th>Date</th><th>Amount ₹</th><th>Note</th><th>Recorded by</th><th style="width:40px"></th></tr>
+          </thead>
+          <tbody id="pay-tbody">
+            <tr><td colspan="5" class="empty-state">No payments recorded yet</td></tr>
+          </tbody>
+        </table>
+      </div>
+    </div>
+  </div>
+
+  <div class="quote-sidebar">
+    <div class="card totals-card sticky-top">
+      <h2 class="card-title">Summary</h2>
+      <div class="totals">
+        <div class="total-row"><span>Order Total</span><span id="sum-total">₹ 0.00</span></div>
+        <div class="total-row"><span>Received</span><span id="sum-received">₹ 0.00</span></div>
+        <div class="total-row total-grand"><span>Balance</span><span id="sum-balance">₹ 0.00</span></div>
+      </div>
+      <div class="totals" style="margin-top:14px">
+        <div class="total-row"><span>Items Supplied</span><span id="sum-supplied">0 / 0</span></div>
+      </div>
+      <div class="form-group full-width" style="margin-top:14px">
+        <label>Order Notes</label>
+        <textarea id="ord-notes" class="input" rows="3" placeholder="Internal notes about this order…"></textarea>
+      </div>
+    </div>
+  </div>
+</div>
+{% endblock %}
+{% block scripts %}
+<script>
+const OID = {{ oid }};
+let orderData = null;
+
+async function init() {
+  document.getElementById('pay-date').value = new Date().toISOString().split('T')[0];
+  await load();
+}
+
+async function load() {
+  const data = await fetch(`/api/orders/${OID}`).then(r => r.json());
+  if (data.error) {
+    alert('This order no longer exists.');
+    window.location.href = '/orders';
+    return;
+  }
+  orderData = data;
+  const o = data.order;
+  document.getElementById('page-title').childNodes[0].textContent = `Order ${o.quote_number} `;
+  document.getElementById('ord-status-badge').textContent = o.status === 'completed' ? 'Completed' : 'Open';
+  document.getElementById('ord-status-badge').className = 'badge ' + (o.status === 'completed' ? 'badge-success' : '');
+  document.getElementById('ord-quote-link').innerHTML =
+    `${esc(o.client_name)}${o.quotation_id ? ` · <a href="/quotation/${o.quotation_id}/edit" class="link-sm">View original quotation →</a>` : ''}`;
+  document.getElementById('ord-notes').value = o.notes || '';
+
+  renderItems(data.items);
+  renderPayments(data.payments);
+  updateSummary();
+}
+
+function renderItems(items) {
+  const tbody = document.getElementById('ord-items-tbody');
+  tbody.innerHTML = items.map(it => `
+    <tr>
+      <td data-label="Description"><strong>${esc(it.description)}</strong>${it.code ? `<div style="font-size:11px;color:var(--text-muted)">${esc(it.code)}</div>` : ''}</td>
+      <td data-label="Unit">${esc(it.unit)}</td>
+      <td data-label="Ordered">${fmtNum(it.quantity)}</td>
+      <td data-label="Supplied">
+        <input type="number" class="input-inline narrow right" min="0" step="any"
+          value="${it.supplied_qty}" id="supplied-${it.id}"
+          oninput="onSuppliedChange(${it.id})"/>
+      </td>
+      <td data-label="Unit ₹">${fmtMoney(it.unit_price)}</td>
+      <td data-label="Amount ₹">${fmtMoney(it.quantity * it.unit_price)}</td>
+      <td data-label=""><button class="btn btn-sm" onclick="markFullySupplied(${it.id}, ${it.quantity})">Mark Full</button></td>
+    </tr>
+  `).join('');
+}
+
+function onSuppliedChange(itemId) {
+  const item = orderData.items.find(i => i.id === itemId);
+  const input = document.getElementById(`supplied-${itemId}`);
+  item.supplied_qty = parseFloat(input.value) || 0;
+  updateSummary();
+}
+
+function markFullySupplied(itemId, qty) {
+  document.getElementById(`supplied-${itemId}`).value = qty;
+  onSuppliedChange(itemId);
+}
+
+function updateSummary() {
+  const totalQty = orderData.items.reduce((s, i) => s + i.quantity, 0);
+  const suppliedQty = orderData.items.reduce((s, i) => s + i.supplied_qty, 0);
+  const total = orderData.items.reduce((s, i) => s + i.quantity * i.unit_price, 0);
+  const received = orderData.payments.reduce((s, p) => s + p.amount, 0);
+  document.getElementById('sum-total').textContent = fmtMoney(total);
+  document.getElementById('sum-received').textContent = fmtMoney(received);
+  document.getElementById('sum-balance').textContent = fmtMoney(total - received);
+  document.getElementById('sum-supplied').textContent = `${fmtNum(suppliedQty)} / ${fmtNum(totalQty)}`;
+}
+
+async function saveOrder() {
+  const payload = {
+    notes: document.getElementById('ord-notes').value,
+    items: orderData.items.map(i => ({id: i.id, supplied_qty: i.supplied_qty})),
+  };
+  const r = await fetch(`/api/orders/${OID}`, {method: 'PUT', headers: {'Content-Type':'application/json'}, body: JSON.stringify(payload)});
+  const data = await r.json();
+  if (data.error) { alert(data.error); return; }
+  showToast('Saved');
+  load();
+}
+
+function renderPayments(payments) {
+  const tbody = document.getElementById('pay-tbody');
+  if (!payments.length) {
+    tbody.innerHTML = '<tr><td colspan="5" class="empty-state">No payments recorded yet</td></tr>';
+    return;
+  }
+  tbody.innerHTML = payments.map(p => `
+    <tr>
+      <td>${esc(p.payment_date)}</td>
+      <td>${fmtMoney(p.amount)}</td>
+      <td>${esc(p.note || '—')}</td>
+      <td style="color:var(--text-muted);font-size:12px">${esc(p.recorded_by)}</td>
+      <td><button class="btn-icon danger" onclick="deletePayment(${p.id})">✕</button></td>
+    </tr>
+  `).join('');
+}
+
+async function addPayment() {
+  const amount = parseFloat(document.getElementById('pay-amount').value);
+  const payment_date = document.getElementById('pay-date').value;
+  const note = document.getElementById('pay-note').value.trim();
+  if (!amount || amount <= 0) { alert('Enter a valid payment amount'); return; }
+  if (!payment_date) { alert('Select a payment date'); return; }
+  const r = await fetch(`/api/orders/${OID}/payments`, {
+    method: 'POST', headers: {'Content-Type':'application/json'},
+    body: JSON.stringify({amount, payment_date, note})
+  });
+  const data = await r.json();
+  if (data.error) { alert(data.error); return; }
+  document.getElementById('pay-amount').value = '';
+  document.getElementById('pay-note').value = '';
+  showToast('Payment recorded');
+  load();
+}
+
+async function deletePayment(pid) {
+  if (!confirm('Remove this payment record?')) return;
+  await fetch(`/api/orders/${OID}/payments/${pid}`, {method: 'DELETE'});
+  load();
+}
+
+function fmtMoney(n) { return '₹ ' + Number(n||0).toLocaleString('en-IN', {minimumFractionDigits: 2, maximumFractionDigits: 2}); }
+function fmtNum(n) { return Number(n||0).toLocaleString('en-IN', {maximumFractionDigits: 2}); }
+function esc(s) { return String(s||'').replace(/&/g,'&amp;').replace(/"/g,'&quot;').replace(/</g,'&lt;'); }
+
+function showToast(msg) {
+  let t = document.getElementById('toast');
+  if (!t) { t = document.createElement('div'); t.id = 'toast'; t.className = 'toast'; document.body.appendChild(t); }
+  t.textContent = msg; t.classList.add('show');
+  setTimeout(() => t.classList.remove('show'), 2000);
+}
+
+init();
+</script>
+{% endblock %}

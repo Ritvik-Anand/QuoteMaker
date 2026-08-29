@@ -240,6 +240,18 @@ def edit_project_page(pid):
     return render_template("project_edit.html", pid=pid)
 
 
+@app.route("/orders")
+@login_required
+def orders_page():
+    return render_template("orders.html")
+
+
+@app.route("/orders/<int:oid>")
+@login_required
+def order_detail_page(oid):
+    return render_template("order_detail.html", oid=oid)
+
+
 @app.route("/attendance")
 @marker_required
 def attendance_page():
@@ -679,8 +691,9 @@ def get_quotation(qid):
     items = conn.execute(
         "SELECT * FROM quotation_items WHERE quotation_id = ? ORDER BY sort_order", (qid,)
     ).fetchall()
+    order = conn.execute("SELECT id FROM orders WHERE quotation_id=?", (qid,)).fetchone()
     conn.close()
-    return jsonify({"quotation": q, "items": items})
+    return jsonify({"quotation": q, "items": items, "order_id": order["id"] if order else None})
 
 
 @app.route("/api/quotations/<int:qid>", methods=["PUT"])
@@ -724,6 +737,48 @@ def delete_quotation(qid):
     conn.commit()
     conn.close()
     return jsonify({"ok": True})
+
+
+@app.route("/api/quotations/<int:qid>/accept", methods=["POST"])
+@login_required
+def accept_quotation(qid):
+    conn = get_db()
+    q = conn.execute("SELECT * FROM quotations WHERE id=?", (qid,)).fetchone()
+    if not q:
+        conn.close()
+        return jsonify({"error": "Not found"}), 404
+    existing = conn.execute("SELECT id FROM orders WHERE quotation_id=?", (qid,)).fetchone()
+    if existing:
+        conn.close()
+        return jsonify({"order_id": existing["id"]})
+
+    items = conn.execute(
+        "SELECT * FROM quotation_items WHERE quotation_id=? ORDER BY sort_order", (qid,)
+    ).fetchall()
+    if not items:
+        conn.close()
+        return jsonify({"error": "Add at least one item before accepting this quotation"}), 400
+
+    oid = conn.insert(
+        "INSERT INTO orders (quotation_id, quote_number, client_name, client_address, notes, created_by) "
+        "VALUES (?,?,?,?,?,?)",
+        (qid, q["quote_number"], q["client_name"], q["client_address"] or "", q["notes"] or "",
+         session["username"])
+    )
+    for idx, item in enumerate(items):
+        conn.execute(
+            "INSERT INTO order_items (order_id, description, code, unit, quantity, unit_price, sort_order) "
+            "VALUES (?,?,?,?,?,?,?)",
+            (oid, item["description"], item["code"] or "", item["unit"], item["quantity"],
+             item["final_price"], idx)
+        )
+    conn.execute(
+        "UPDATE quotations SET status='accepted', accepted_by=?, accepted_at=CURRENT_TIMESTAMP WHERE id=?",
+        (session["username"], qid)
+    )
+    conn.commit()
+    conn.close()
+    return jsonify({"order_id": oid})
 
 
 # ── Export API ─────────────────────────────────────────────────────────────────
@@ -1301,6 +1356,133 @@ def generate_quotation_from_project(pid):
     conn.commit()
     conn.close()
     return jsonify({"quotation_id": qid})
+
+
+# ── Orders API ──────────────────────────────────────────────────────────────────
+
+_ORDER_TOTALS_JOIN = (
+    "LEFT JOIN (SELECT order_id, SUM(quantity*unit_price) as total_amount, "
+    "SUM(quantity) as total_qty, SUM(supplied_qty) as total_supplied "
+    "FROM order_items GROUP BY order_id) oi ON oi.order_id = o.id "
+    "LEFT JOIN (SELECT order_id, SUM(amount) as paid_amount "
+    "FROM order_payments GROUP BY order_id) op ON op.order_id = o.id"
+)
+
+
+# Open/Completed is derived from the underlying rows on every read rather
+# than stored, so it can never drift out of sync with the items/payments
+# that actually determine it.
+def _annotate_order_status(row):
+    row["total_amount"] = row["total_amount"] or 0
+    row["total_qty"] = row["total_qty"] or 0
+    row["total_supplied"] = row["total_supplied"] or 0
+    row["paid_amount"] = row["paid_amount"] or 0
+    row["balance"] = row["total_amount"] - row["paid_amount"]
+    fully_supplied = row["total_supplied"] >= row["total_qty"] - 1e-6
+    fully_paid = row["paid_amount"] >= row["total_amount"] - 1e-6
+    row["status"] = "completed" if (fully_supplied and fully_paid) else "open"
+    return row
+
+
+@app.route("/api/orders", methods=["GET"])
+@login_required
+def list_orders():
+    conn = get_db()
+    rows = conn.execute(
+        f"SELECT o.*, oi.total_amount, oi.total_qty, oi.total_supplied, op.paid_amount "
+        f"FROM orders o {_ORDER_TOTALS_JOIN} ORDER BY o.id DESC"
+    ).fetchall()
+    conn.close()
+    return jsonify([_annotate_order_status(r) for r in rows])
+
+
+@app.route("/api/orders/<int:oid>", methods=["GET"])
+@login_required
+def get_order(oid):
+    conn = get_db()
+    row = conn.execute(
+        f"SELECT o.*, oi.total_amount, oi.total_qty, oi.total_supplied, op.paid_amount "
+        f"FROM orders o {_ORDER_TOTALS_JOIN} WHERE o.id=?", (oid,)
+    ).fetchone()
+    if not row:
+        conn.close()
+        return jsonify({"error": "Not found"}), 404
+    order = _annotate_order_status(row)
+    items = conn.execute(
+        "SELECT * FROM order_items WHERE order_id=? ORDER BY sort_order", (oid,)
+    ).fetchall()
+    payments = conn.execute(
+        "SELECT * FROM order_payments WHERE order_id=? ORDER BY payment_date DESC, id DESC", (oid,)
+    ).fetchall()
+    conn.close()
+    return jsonify({"order": order, "items": items, "payments": payments})
+
+
+@app.route("/api/orders/<int:oid>", methods=["PUT"])
+@login_required
+def update_order(oid):
+    data = request.json
+    conn = get_db()
+    if not conn.execute("SELECT id FROM orders WHERE id=?", (oid,)).fetchone():
+        conn.close()
+        return jsonify({"error": "Not found"}), 404
+    conn.execute(
+        "UPDATE orders SET notes=?, updated_at=CURRENT_TIMESTAMP WHERE id=?",
+        (data.get("notes", ""), oid)
+    )
+    for item in data.get("items", []):
+        conn.execute(
+            "UPDATE order_items SET supplied_qty=? WHERE id=? AND order_id=?",
+            (float(item.get("supplied_qty", 0)), item["id"], oid)
+        )
+    conn.commit()
+    conn.close()
+    return jsonify({"ok": True})
+
+
+@app.route("/api/orders/<int:oid>", methods=["DELETE"])
+@login_required
+def delete_order(oid):
+    conn = get_db()
+    conn.execute("DELETE FROM orders WHERE id=?", (oid,))
+    conn.commit()
+    conn.close()
+    return jsonify({"ok": True})
+
+
+@app.route("/api/orders/<int:oid>/payments", methods=["POST"])
+@login_required
+def add_order_payment(oid):
+    data = request.json
+    conn = get_db()
+    if not conn.execute("SELECT id FROM orders WHERE id=?", (oid,)).fetchone():
+        conn.close()
+        return jsonify({"error": "Not found"}), 404
+    amount = float(data.get("amount") or 0)
+    if amount <= 0:
+        conn.close()
+        return jsonify({"error": "Enter a payment amount greater than 0"}), 400
+    pid = conn.insert(
+        "INSERT INTO order_payments (order_id, amount, payment_date, note, recorded_by) "
+        "VALUES (?,?,?,?,?)",
+        (oid, amount, data.get("payment_date") or date.today().isoformat(),
+         data.get("note", ""), session["username"])
+    )
+    conn.execute("UPDATE orders SET updated_at=CURRENT_TIMESTAMP WHERE id=?", (oid,))
+    conn.commit()
+    conn.close()
+    return jsonify({"id": pid})
+
+
+@app.route("/api/orders/<int:oid>/payments/<int:pid>", methods=["DELETE"])
+@login_required
+def delete_order_payment(oid, pid):
+    conn = get_db()
+    conn.execute("DELETE FROM order_payments WHERE id=? AND order_id=?", (pid, oid))
+    conn.execute("UPDATE orders SET updated_at=CURRENT_TIMESTAMP WHERE id=?", (oid,))
+    conn.commit()
+    conn.close()
+    return jsonify({"ok": True})
 
 
 # Runs on import so it also fires under Vercel's serverless WSGI handler

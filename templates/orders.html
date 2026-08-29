@@ -1,0 +1,83 @@
+{% extends "base.html" %}
+{% block title %}Orders{% endblock %}
+{% block content %}
+<div class="page-header">
+  <h1>Orders</h1>
+</div>
+
+<div class="card">
+  <div class="table-wrap ord-table-wrap">
+  <table class="data-table">
+    <thead>
+      <tr><th>Order</th><th>Client</th><th>Total ₹</th><th>Supplied</th><th>Received ₹</th><th>Balance ₹</th><th>Status</th><th>Actions</th></tr>
+    </thead>
+    <tbody id="ord-tbody">
+      <tr><td colspan="8" class="empty-state">Loading…</td></tr>
+    </tbody>
+  </table>
+  </div>
+  <div class="ord-cards" id="ord-cards"></div>
+</div>
+{% endblock %}
+{% block scripts %}
+<script>
+function fmt(n) { return '₹' + Number(n||0).toLocaleString('en-IN', {maximumFractionDigits: 0}); }
+
+function statusBadge(o) {
+  return o.status === 'completed'
+    ? '<span class="badge badge-success">Completed</span>'
+    : '<span class="badge">Open</span>';
+}
+
+function suppliedBadge(o) {
+  const pct = o.total_qty > 0 ? Math.round((o.total_supplied / o.total_qty) * 100) : 0;
+  return `<span class="badge ${pct >= 100 ? 'badge-success' : ''}">${pct}%</span>`;
+}
+
+async function loadOrders() {
+  const orders = await fetch('/api/orders').then(r => r.json());
+  const tbody = document.getElementById('ord-tbody');
+  const cards = document.getElementById('ord-cards');
+  if (!orders.length) {
+    const msg = 'No orders yet — accept a quotation to create one.';
+    tbody.innerHTML = `<tr><td colspan="8" class="empty-state">${msg}</td></tr>`;
+    cards.innerHTML = `<div class="empty-state">${msg}</div>`;
+    return;
+  }
+  tbody.innerHTML = orders.map(o => `
+    <tr>
+      <td><a href="/orders/${o.id}" class="link-sm"><strong>${esc(o.quote_number)}</strong></a></td>
+      <td>${esc(o.client_name)}</td>
+      <td>${fmt(o.total_amount)}</td>
+      <td>${suppliedBadge(o)}</td>
+      <td>${fmt(o.paid_amount)}</td>
+      <td>${o.balance > 0 ? fmt(o.balance) : '<span style="color:var(--text-faint)">Paid in full</span>'}</td>
+      <td>${statusBadge(o)}</td>
+      <td class="actions-cell"><a href="/orders/${o.id}" class="btn btn-sm">Open</a></td>
+    </tr>
+  `).join('');
+
+  cards.innerHTML = orders.map(o => `
+    <div class="ord-card">
+      <div class="ord-card-top">
+        <a href="/orders/${o.id}" class="link-sm"><strong>${esc(o.quote_number)}</strong></a>
+        ${statusBadge(o)}
+      </div>
+      <div class="ord-card-meta">${esc(o.client_name)}</div>
+      <div class="ord-card-grid">
+        <div><span class="ord-card-label">Total</span>${fmt(o.total_amount)}</div>
+        <div><span class="ord-card-label">Supplied</span>${suppliedBadge(o)}</div>
+        <div><span class="ord-card-label">Received</span>${fmt(o.paid_amount)}</div>
+        <div><span class="ord-card-label">Balance</span>${o.balance > 0 ? fmt(o.balance) : 'Paid in full'}</div>
+      </div>
+      <div class="ord-card-actions">
+        <a href="/orders/${o.id}" class="btn btn-sm">Open</a>
+      </div>
+    </div>
+  `).join('');
+}
+
+function esc(s) { return String(s||'').replace(/&/g,'&amp;').replace(/"/g,'&quot;').replace(/</g,'&lt;'); }
+loadOrders();
+</script>
+{% endblock %}

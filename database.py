@@ -222,6 +222,40 @@ CREATE TABLE IF NOT EXISTS project_item_options (
     sale_adj_value     REAL DEFAULT 0,
     created_at         TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
+CREATE TABLE IF NOT EXISTS orders (
+    id             INTEGER PRIMARY KEY AUTOINCREMENT,
+    quotation_id   INTEGER UNIQUE REFERENCES quotations(id) ON DELETE SET NULL,
+    quote_number   TEXT NOT NULL,
+    client_name    TEXT NOT NULL,
+    client_address TEXT DEFAULT '',
+    notes          TEXT DEFAULT '',
+    created_by     TEXT DEFAULT '',
+    created_at     TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    updated_at     TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+-- Items are copied in from the quotation at accept-time (not referenced
+-- live) so later edits to the quotation never retroactively change an
+-- order that's already partway through being supplied.
+CREATE TABLE IF NOT EXISTS order_items (
+    id           INTEGER PRIMARY KEY AUTOINCREMENT,
+    order_id     INTEGER NOT NULL REFERENCES orders(id) ON DELETE CASCADE,
+    description  TEXT NOT NULL,
+    code         TEXT DEFAULT '',
+    unit         TEXT DEFAULT 'Nos',
+    quantity     REAL NOT NULL DEFAULT 1,
+    unit_price   REAL NOT NULL DEFAULT 0,
+    supplied_qty REAL NOT NULL DEFAULT 0,
+    sort_order   INTEGER DEFAULT 0
+);
+CREATE TABLE IF NOT EXISTS order_payments (
+    id           INTEGER PRIMARY KEY AUTOINCREMENT,
+    order_id     INTEGER NOT NULL REFERENCES orders(id) ON DELETE CASCADE,
+    amount       REAL NOT NULL,
+    payment_date TEXT NOT NULL,
+    note         TEXT DEFAULT '',
+    recorded_by  TEXT DEFAULT '',
+    recorded_at  TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
 """
 
 _PG_TABLES = [
@@ -355,6 +389,37 @@ _PG_TABLES = [
         sale_adj_value     REAL DEFAULT 0,
         created_at         TIMESTAMP DEFAULT CURRENT_TIMESTAMP
     )""",
+    """CREATE TABLE IF NOT EXISTS orders (
+        id             SERIAL PRIMARY KEY,
+        quotation_id   INTEGER UNIQUE REFERENCES quotations(id) ON DELETE SET NULL,
+        quote_number   TEXT NOT NULL,
+        client_name    TEXT NOT NULL,
+        client_address TEXT DEFAULT '',
+        notes          TEXT DEFAULT '',
+        created_by     TEXT DEFAULT '',
+        created_at     TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        updated_at     TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+    )""",
+    """CREATE TABLE IF NOT EXISTS order_items (
+        id           SERIAL PRIMARY KEY,
+        order_id     INTEGER NOT NULL REFERENCES orders(id) ON DELETE CASCADE,
+        description  TEXT NOT NULL,
+        code         TEXT DEFAULT '',
+        unit         TEXT DEFAULT 'Nos',
+        quantity     REAL NOT NULL DEFAULT 1,
+        unit_price   REAL NOT NULL DEFAULT 0,
+        supplied_qty REAL NOT NULL DEFAULT 0,
+        sort_order   INTEGER DEFAULT 0
+    )""",
+    """CREATE TABLE IF NOT EXISTS order_payments (
+        id           SERIAL PRIMARY KEY,
+        order_id     INTEGER NOT NULL REFERENCES orders(id) ON DELETE CASCADE,
+        amount       REAL NOT NULL,
+        payment_date TEXT NOT NULL,
+        note         TEXT DEFAULT '',
+        recorded_by  TEXT DEFAULT '',
+        recorded_at  TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+    )""",
 ]
 
 
@@ -378,6 +443,11 @@ _COLUMN_MIGRATIONS = [
     # terms to stay worth offering.
     ("project_item_options", "sale_adj_type", "TEXT DEFAULT 'discount'"),
     ("project_item_options", "sale_adj_value", "REAL DEFAULT 0"),
+    # 'draft' or 'accepted' — flips once, when the matching row in orders is
+    # created; there's no path back to 'draft' short of deleting the order.
+    ("quotations", "status", "TEXT DEFAULT 'draft'"),
+    ("quotations", "accepted_by", "TEXT DEFAULT ''"),
+    ("quotations", "accepted_at", "TIMESTAMP"),
 ]
 
 
