@@ -6,6 +6,27 @@
   <a href="/projects/new" class="btn btn-primary">+ New Project</a>
 </div>
 
+{% if session.is_admin %}
+<div class="stats-grid" id="proj-overview">
+  <div class="stat-card">
+    <div class="stat-value" id="ov-purchase">—</div>
+    <div class="stat-label">Total Purchase Cost</div>
+  </div>
+  <div class="stat-card">
+    <div class="stat-value" id="ov-sale">—</div>
+    <div class="stat-label">Total Sale Value</div>
+  </div>
+  <div class="stat-card">
+    <div class="stat-value" id="ov-margin">—</div>
+    <div class="stat-label">Total Margin</div>
+  </div>
+  <div class="stat-card">
+    <div class="stat-value" id="ov-margin-pct">—</div>
+    <div class="stat-label">Margin %</div>
+  </div>
+</div>
+{% endif %}
+
 <div class="card">
   <div class="table-wrap proj-table-wrap">
   <table class="data-table">
@@ -22,6 +43,17 @@
 {% endblock %}
 {% block scripts %}
 <script>
+const IS_ADMIN = {{ 'true' if session.is_admin else 'false' }};
+
+async function loadOverview() {
+  if (!IS_ADMIN) return;
+  const s = await fetch('/api/projects/stats').then(r => r.json());
+  document.getElementById('ov-purchase').textContent = '₹' + s.total_purchase.toLocaleString('en-IN', {maximumFractionDigits: 0});
+  document.getElementById('ov-sale').textContent = '₹' + s.total_sale.toLocaleString('en-IN', {maximumFractionDigits: 0});
+  document.getElementById('ov-margin').textContent = '₹' + s.total_margin.toLocaleString('en-IN', {maximumFractionDigits: 0});
+  document.getElementById('ov-margin-pct').textContent = s.margin_pct.toFixed(1) + '%';
+}
+
 async function loadProjects() {
   const projects = await fetch('/api/projects').then(r => r.json());
   const tbody = document.getElementById('proj-tbody');
@@ -70,5 +102,6 @@ async function deleteProject(id, name) {
 function esc(s) { return String(s||'').replace(/&/g,'&amp;').replace(/"/g,'&quot;').replace(/</g,'&lt;'); }
 function jsAttr(s) { return String(s||'').replace(/\\/g,'\\\\').replace(/'/g,"\\'").replace(/\n/g,' '); }
 loadProjects();
+loadOverview();
 </script>
 {% endblock %}

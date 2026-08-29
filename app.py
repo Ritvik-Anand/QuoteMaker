@@ -1197,6 +1197,40 @@ def list_projects():
     return jsonify(rows)
 
 
+@app.route("/api/projects/stats", methods=["GET"])
+@admin_required
+def project_stats():
+    conn = get_db()
+    # Only lines with a chosen winner count toward the totals — same rule
+    # each project editor uses for its own purchase/sale/margin summary,
+    # so this is just that same math rolled up across every project.
+    rows = conn.execute(
+        "SELECT pi.quantity, pio.list_price, pio.purchase_adj_type, pio.purchase_adj_value, "
+        "pio.sale_adj_type, pio.sale_adj_value "
+        "FROM project_items pi JOIN project_item_options pio ON pio.id = pi.selected_option_id "
+        "WHERE pi.selected_option_id IS NOT NULL"
+    ).fetchall()
+    project_count = conn.execute("SELECT COUNT(*) as n FROM projects").fetchone()["n"]
+    conn.close()
+
+    total_purchase = 0.0
+    total_sale = 0.0
+    for r in rows:
+        qty = r["quantity"]
+        total_purchase += _compute_price(r["list_price"], r["purchase_adj_type"], r["purchase_adj_value"]) * qty
+        total_sale += _compute_price(r["list_price"], r["sale_adj_type"], r["sale_adj_value"]) * qty
+    margin = total_sale - total_purchase
+    margin_pct = (margin / total_sale * 100) if total_sale > 0 else 0
+    return jsonify({
+        "project_count": project_count,
+        "priced_line_count": len(rows),
+        "total_purchase": round(total_purchase, 2),
+        "total_sale": round(total_sale, 2),
+        "total_margin": round(margin, 2),
+        "margin_pct": round(margin_pct, 1),
+    })
+
+
 @app.route("/api/projects", methods=["POST"])
 @login_required
 def create_project():
