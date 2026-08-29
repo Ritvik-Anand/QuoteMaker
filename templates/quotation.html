@@ -46,6 +46,13 @@
           <label>GST Rate (%)</label>
           <input type="number" id="gst-rate" class="input" value="18" min="0" max="100" step="0.5" oninput="updateTotals()" />
         </div>
+        <div class="form-group">
+          <label>&nbsp;</label>
+          <label class="checkbox-label">
+            <input type="checkbox" id="cash-discount" onchange="updateTotals()"/>
+            <span>Cash Discount (1% off subtotal, before GST)</span>
+          </label>
+        </div>
         <div class="form-group full-width">
           <label>Client Address <span class="opt">(optional)</span></label>
           <textarea id="client-address" class="input" rows="2" placeholder="Address shown on quotation"></textarea>
@@ -117,6 +124,7 @@
       <h2 class="card-title">Summary</h2>
       <div class="totals">
         <div class="total-row"><span>Subtotal</span><span id="t-subtotal">₹ 0.00</span></div>
+        <div class="total-row" id="t-discount-row" style="display:none"><span>Cash Discount (1%)</span><span id="t-discount">− ₹ 0.00</span></div>
         <div class="total-row"><span id="t-gst-label">GST (18%)</span><span id="t-gst">₹ 0.00</span></div>
         <div class="total-row total-grand"><span>TOTAL</span><span id="t-total">₹ 0.00</span></div>
       </div>
@@ -168,6 +176,7 @@ async function init() {
     document.getElementById('client-name').value = q.client_name;
     document.getElementById('client-address').value = q.client_address || '';
     document.getElementById('gst-rate').value = q.gst_rate;
+    document.getElementById('cash-discount').checked = !!q.cash_discount;
     document.getElementById('quote-notes').value = q.notes || '';
     quoteTags = (q.tags || '').split(',').map(t => t.trim()).filter(Boolean);
     renderTags();
@@ -587,10 +596,17 @@ function attachDragHandlers() {
 
 function updateTotals() {
   const gstRate = parseFloat(document.getElementById('gst-rate').value) || 0;
+  const cashDiscount = document.getElementById('cash-discount').checked;
   const subtotal = quoteItems.reduce((s, i) => s + i.quantity * i.final_price, 0);
-  const gst = subtotal * gstRate / 100;
-  const total = subtotal + gst;
+  // Cash discount comes off the subtotal before GST — GST is owed on what
+  // the client actually pays, not on the pre-discount subtotal.
+  const discount = cashDiscount ? subtotal * 0.01 : 0;
+  const taxable = subtotal - discount;
+  const gst = taxable * gstRate / 100;
+  const total = taxable + gst;
   document.getElementById('t-subtotal').textContent = '₹ ' + fmt(subtotal);
+  document.getElementById('t-discount-row').style.display = cashDiscount ? '' : 'none';
+  document.getElementById('t-discount').textContent = '− ₹ ' + fmt(discount);
   document.getElementById('t-gst-label').textContent = `GST (${gstRate}%)`;
   document.getElementById('t-gst').textContent = '₹ ' + fmt(gst);
   document.getElementById('t-total').textContent = '₹ ' + fmt(total);
@@ -605,6 +621,7 @@ async function saveQuotation() {
     client_address: document.getElementById('client-address').value.trim(),
     date: document.getElementById('quote-date').value,
     gst_rate: parseFloat(document.getElementById('gst-rate').value) || 18,
+    cash_discount: document.getElementById('cash-discount').checked,
     notes: document.getElementById('quote-notes').value.trim(),
     tags: quoteTags.join(', '),
     items: quoteItems,

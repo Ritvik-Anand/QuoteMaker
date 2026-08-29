@@ -655,10 +655,10 @@ def create_quotation():
     try:
         qid = conn.insert(
             "INSERT INTO quotations (quote_number, client_name, client_address, date, gst_rate, notes, tags, "
-            "created_by, updated_by) VALUES (?,?,?,?,?,?,?,?,?)",
+            "cash_discount, created_by, updated_by) VALUES (?,?,?,?,?,?,?,?,?,?)",
             (data["quote_number"], data["client_name"], data.get("client_address", ""),
              data["date"], float(data.get("gst_rate", 18)), data.get("notes", ""), data.get("tags", ""),
-             session["username"], session["username"])
+             int(bool(data.get("cash_discount"))), session["username"], session["username"])
         )
         conn.commit()
         for idx, item in enumerate(data.get("items", [])):
@@ -704,10 +704,10 @@ def update_quotation(qid):
     try:
         conn.execute(
             "UPDATE quotations SET quote_number=?, client_name=?, client_address=?, date=?, "
-            "gst_rate=?, notes=?, tags=?, updated_by=?, updated_at=CURRENT_TIMESTAMP WHERE id=?",
+            "gst_rate=?, notes=?, tags=?, cash_discount=?, updated_by=?, updated_at=CURRENT_TIMESTAMP WHERE id=?",
             (data["quote_number"], data["client_name"], data.get("client_address", ""), data["date"],
              float(data.get("gst_rate", 18)), data.get("notes", ""), data.get("tags", ""),
-             session["username"], qid)
+             int(bool(data.get("cash_discount"))), session["username"], qid)
         )
         conn.execute("DELETE FROM quotation_items WHERE quotation_id = ?", (qid,))
         for idx, item in enumerate(data.get("items", [])):

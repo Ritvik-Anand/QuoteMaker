@@ -448,6 +448,9 @@ _COLUMN_MIGRATIONS = [
     ("quotations", "status", "TEXT DEFAULT 'draft'"),
     ("quotations", "accepted_by", "TEXT DEFAULT ''"),
     ("quotations", "accepted_at", "TIMESTAMP"),
+    # 1% off the subtotal, applied before GST — GST is owed on what the
+    # client actually pays, not on the pre-discount subtotal.
+    ("quotations", "cash_discount", "INTEGER DEFAULT 0"),
 ]
 
 

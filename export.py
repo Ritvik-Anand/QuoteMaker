@@ -29,11 +29,15 @@ LIGHT_GRAY = colors.HexColor("#f7f7f7")
 MID_GRAY = colors.HexColor("#dddddd")
 
 
-def _compute_totals(quote_items, gst_rate):
+def _compute_totals(quote_items, gst_rate, cash_discount=False):
     subtotal = sum(item["quantity"] * item["final_price"] for item in quote_items)
-    gst_amount = round(subtotal * gst_rate / 100, 2)
-    total = round(subtotal + gst_amount, 2)
-    return round(subtotal, 2), gst_amount, total
+    # Cash discount comes off the subtotal before GST is applied, not off
+    # the final total — GST is owed on what the client actually pays.
+    discount = round(subtotal * 0.01, 2) if cash_discount else 0
+    taxable = subtotal - discount
+    gst_amount = round(taxable * gst_rate / 100, 2)
+    total = round(taxable + gst_amount, 2)
+    return round(subtotal, 2), discount, gst_amount, total
 
 
 def generate_pdf(quotation: dict, quote_items: list[dict]) -> bytes:
@@ -125,23 +129,27 @@ def generate_pdf(quotation: dict, quote_items: list[dict]) -> bytes:
     story.append(Spacer(1, 4 * mm))
 
     # Totals
-    subtotal, gst_amount, total = _compute_totals(quote_items, quotation.get("gst_rate", 18))
+    cash_discount = bool(quotation.get("cash_discount"))
+    subtotal, discount, gst_amount, total = _compute_totals(
+        quote_items, quotation.get("gst_rate", 18), cash_discount
+    )
     gst_rate = quotation.get("gst_rate", 18)
 
-    totals_data = [
-        ["", "Subtotal", f"₹ {subtotal:,.2f}"],
-        ["", f"GST ({gst_rate:.0f}%)", f"₹ {gst_amount:,.2f}"],
-        ["", "TOTAL", f"₹ {total:,.2f}"],
-    ]
+    totals_data = [["", "Subtotal", f"₹ {subtotal:,.2f}"]]
+    if cash_discount:
+        totals_data.append(["", "Cash Discount (1%)", f"− ₹ {discount:,.2f}"])
+    totals_data.append(["", f"GST ({gst_rate:.0f}%)", f"₹ {gst_amount:,.2f}"])
+    totals_data.append(["", "TOTAL", f"₹ {total:,.2f}"])
+    total_row = len(totals_data) - 1
     totals_table = Table(totals_data, colWidths=[115 * mm, 35 * mm, 27 * mm])
     totals_table.setStyle(TableStyle([
         ("ALIGN", (1, 0), (-1, -1), "RIGHT"),
         ("FONTNAME", (0, 0), (-1, -1), FONT),
-        ("FONTNAME", (1, 2), (-1, 2), FONT_BOLD),
+        ("FONTNAME", (1, total_row), (-1, total_row), FONT_BOLD),
         ("FONTSIZE", (0, 0), (-1, -1), 9),
-        ("FONTSIZE", (1, 2), (-1, 2), 10),
-        ("LINEABOVE", (1, 2), (-1, 2), 1, BRAND_COLOR),
-        ("TEXTCOLOR", (1, 2), (-1, 2), BRAND_COLOR),
+        ("FONTSIZE", (1, total_row), (-1, total_row), 10),
+        ("LINEABOVE", (1, total_row), (-1, total_row), 1, BRAND_COLOR),
+        ("TEXTCOLOR", (1, total_row), (-1, total_row), BRAND_COLOR),
         ("TOPPADDING", (0, 0), (-1, -1), 3),
         ("BOTTOMPADDING", (0, 0), (-1, -1), 3),
     ]))
@@ -267,10 +275,18 @@ def generate_excel(quotation: dict, quote_items: list[dict]) -> bytes:
     row += 1
 
     # Totals
-    subtotal, gst_amount, total = _compute_totals(quote_items, quotation.get("gst_rate", 18))
+    cash_discount = bool(quotation.get("cash_discount"))
+    subtotal, discount, gst_amount, total = _compute_totals(
+        quote_items, quotation.get("gst_rate", 18), cash_discount
+    )
     gst_rate = quotation.get("gst_rate", 18)
 
-    for label, value in [("Subtotal", subtotal), (f"GST ({gst_rate:.0f}%)", gst_amount)]:
+    totals_lines = [("Subtotal", subtotal)]
+    if cash_discount:
+        totals_lines.append(("Cash Discount (1%)", -discount))
+    totals_lines.append((f"GST ({gst_rate:.0f}%)", gst_amount))
+
+    for label, value in totals_lines:
         ws.merge_cells(f"A{row}:F{row}")
         c = ws[f"A{row}"]
         c.value = label
