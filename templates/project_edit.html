@@ -606,6 +606,9 @@ async function saveProject() {
     const r = await fetch('/api/projects', {method: 'POST', headers: {'Content-Type':'application/json'}, body: JSON.stringify({name: payload.name, client_name: payload.client_name, notes: payload.notes})});
     const data = await r.json();
     if (data.error) { alert(data.error); return; }
+    const putR = await fetch(`/api/projects/${data.id}`, {method: 'PUT', headers: {'Content-Type':'application/json'}, body: JSON.stringify(payload)});
+    const putData = await putR.json();
+    if (putData.error) { alert(putData.error); return; }
     location.href = `/projects/${data.id}/edit`;
   }
 }
