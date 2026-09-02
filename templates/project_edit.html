@@ -282,6 +282,40 @@ function onOptionChange(itemIdx, optIdx, field, value) {
   render();
 }
 
+// Typing a rate directly back-derives the adjustment % against list price,
+// same trick quotation.html uses for its Final ₹ column — the stored data
+// stays "list price + adjustment", so nothing else (margins, totals, PDF)
+// needs to know the rate was typed in rather than computed.
+function rateToAdjustment(listPrice, rate) {
+  if (listPrice > 0 && rate !== listPrice) {
+    const diffPct = ((rate - listPrice) / listPrice) * 100;
+    return { type: diffPct > 0 ? 'markup' : 'discount', value: Math.round(Math.abs(diffPct) * 100) / 100 };
+  }
+  if (listPrice > 0) return { type: 'none', value: 0 };
+  // No list price to base a % off of — the typed rate becomes the list price itself.
+  return { type: 'none', value: 0, newListPrice: rate };
+}
+
+function onPurchaseRateChange(itemIdx, optIdx, value) {
+  const opt = projectItems[itemIdx].options[optIdx];
+  const rate = parseFloat(value) || 0;
+  const adj = rateToAdjustment(opt.list_price, rate);
+  if (adj.newListPrice !== undefined) opt.list_price = adj.newListPrice;
+  opt.purchase_adj_type = adj.type;
+  opt.purchase_adj_value = adj.value;
+  render();
+}
+
+function onSaleRateChange(itemIdx, optIdx, value) {
+  const opt = projectItems[itemIdx].options[optIdx];
+  const rate = parseFloat(value) || 0;
+  const adj = rateToAdjustment(opt.list_price, rate);
+  if (adj.newListPrice !== undefined) opt.list_price = adj.newListPrice;
+  opt.sale_adj_type = adj.type;
+  opt.sale_adj_value = adj.value;
+  render();
+}
+
 function openAddOption(itemIdx) {
   addOptionTargetIdx = itemIdx;
   document.getElementById('opt-search').value = '';
@@ -596,7 +630,7 @@ function render() {
               <input class="input-sm" style="width:55px" type="number" min="0" step="0.1" value="${opt.purchase_adj_value}" onchange="onOptionChange(${idx},${oi},'purchase_adj_value',this.value)"/>
             </div>
           </td>
-          <td data-label="Purchase ₹" class="right"><strong>₹${purchaseRate.toLocaleString('en-IN',{minimumFractionDigits:2})}</strong></td>
+          <td data-label="Purchase ₹" class="right"><input class="input-inline narrow right" type="number" min="0" step="0.01" value="${purchaseRate}" onchange="onPurchaseRateChange(${idx},${oi},this.value)" title="Type a rate directly — the adjustment % updates to match"/></td>
           <td data-label="Sale Adj.">
             <div style="display:flex;gap:4px">
               <select class="input-sm" onchange="onOptionChange(${idx},${oi},'sale_adj_type',this.value)">
@@ -607,7 +641,7 @@ function render() {
               <input class="input-sm" style="width:55px" type="number" min="0" step="0.1" value="${opt.sale_adj_value}" onchange="onOptionChange(${idx},${oi},'sale_adj_value',this.value)"/>
             </div>
           </td>
-          <td data-label="Sale ₹" class="right">₹${saleRate.toLocaleString('en-IN',{minimumFractionDigits:2})}</td>
+          <td data-label="Sale ₹" class="right"><input class="input-inline narrow right" type="number" min="0" step="0.01" value="${saleRate}" onchange="onSaleRateChange(${idx},${oi},this.value)" title="Type a rate directly — the adjustment % updates to match"/></td>
           <td data-label="Margin" class="right" style="color:${marginUnit>=0?'var(--success,#16a34a)':'var(--danger)'};font-weight:700">₹${marginTotal.toLocaleString('en-IN',{minimumFractionDigits:2})}</td>
           <td><button class="btn-icon danger" onclick="removeOption(${idx},${oi})" title="Remove">✕</button></td>
         </tr>
