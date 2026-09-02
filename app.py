@@ -22,7 +22,7 @@ if _env.exists():
 
 from database import init_db, get_db
 from pdf_parser import parse_catalog_pdf
-from export import generate_pdf, generate_excel
+from export import generate_pdf, generate_excel, generate_payroll_pdf
 from auth import (
     login_required, admin_required, marker_required, payroll_viewer_required,
     verify_user, create_user, change_password,
@@ -1081,6 +1081,34 @@ def list_payroll():
     rows = conn.execute(sql, params).fetchall()
     conn.close()
     return jsonify(rows)
+
+
+@app.route("/api/payroll/export/pdf", methods=["GET"])
+@payroll_viewer_required
+def export_payroll_pdf():
+    year = request.args.get("year", type=int)
+    month = request.args.get("month", type=int)
+    if not year or not month:
+        return jsonify({"error": "year and month are required"}), 400
+    conn = get_db()
+    where = ["p.year = ?", "p.month = ?"]
+    params = [year, month]
+    # Same visibility rule as GET /api/payroll — a non-admin only ever sees
+    # periods actually sent to them, not the admin's in-progress draft.
+    if not session.get("is_admin"):
+        where.append("p.status IN ('finalized','paid')")
+    rows = conn.execute(
+        "SELECT p.*, e.name as employee_name FROM payroll p JOIN employees e ON e.id = p.employee_id "
+        "WHERE " + " AND ".join(where) + " ORDER BY e.name",
+        params
+    ).fetchall()
+    conn.close()
+    if not rows:
+        return jsonify({"error": "No payroll for this period yet"}), 404
+    pdf_bytes = generate_payroll_pdf(year, month, rows)
+    filename = f"Payroll-{year}-{month:02d}.pdf"
+    return send_file(io.BytesIO(pdf_bytes), mimetype="application/pdf",
+                     as_attachment=True, download_name=filename)
 
 
 @app.route("/api/payroll/<int:pid>", methods=["PUT"])

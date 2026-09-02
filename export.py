@@ -326,6 +326,119 @@ def generate_excel(quotation: dict, quote_items: list[dict]) -> bytes:
     return buffer.getvalue()
 
 
+_MONTH_NAMES = ["", "January", "February", "March", "April", "May", "June",
+                "July", "August", "September", "October", "November", "December"]
+
+_PAYROLL_STATUS_LABEL = {"draft": "Draft", "finalized": "Sent to Accountant", "paid": "Paid"}
+
+
+def generate_payroll_pdf(year: int, month: int, rows: list[dict]) -> bytes:
+    buffer = io.BytesIO()
+    doc = SimpleDocTemplate(
+        buffer,
+        pagesize=A4,
+        topMargin=15 * mm,
+        bottomMargin=15 * mm,
+        leftMargin=15 * mm,
+        rightMargin=15 * mm,
+    )
+
+    styles = getSampleStyleSheet()
+    story = []
+
+    header_data = [[
+        Paragraph(
+            f'<font color="#2c5f8a" size="20"><b>BAGULA MUKHI</b></font><br/>'
+            f'<font color="#777777" size="9">Electrical Goods Supplier</font>',
+            ParagraphStyle("h", fontName=FONT, alignment=TA_LEFT)
+        ),
+        Paragraph(
+            f'<font color="#2c5f8a" size="14"><b>PAYROLL SUMMARY</b></font><br/>'
+            f'<font color="#555555" size="9">{_MONTH_NAMES[month]} {year}</font>',
+            ParagraphStyle("h2", fontName=FONT, alignment=TA_RIGHT)
+        ),
+    ]]
+    header_table = Table(header_data, colWidths=[95 * mm, 85 * mm])
+    header_table.setStyle(TableStyle([
+        ("VALIGN", (0, 0), (-1, -1), "TOP"),
+        ("TOPPADDING", (0, 0), (-1, -1), 0),
+        ("BOTTOMPADDING", (0, 0), (-1, -1), 4),
+    ]))
+    story.append(header_table)
+    story.append(HRFlowable(width="100%", thickness=1, color=MID_GRAY, spaceAfter=6))
+    story.append(Spacer(1, 4 * mm))
+
+    col_widths = [42 * mm, 25 * mm, 18 * mm, 18 * mm, 18 * mm, 27 * mm, 27 * mm, 25 * mm]
+    th = lambda t, align=TA_LEFT: Paragraph(f"<b>{t}</b>", ParagraphStyle("th", fontName=FONT_BOLD, fontSize=8, alignment=align))
+    table_data = [[
+        th("Employee"), th("Salary (₹)", TA_RIGHT), th("Present", TA_CENTER), th("Absent", TA_CENTER),
+        th("Unmarked", TA_CENTER), th("Computed Pay (₹)", TA_RIGHT), th("Final Pay (₹)", TA_RIGHT), th("Status"),
+    ]]
+
+    total_computed = 0.0
+    total_final = 0.0
+    for r in rows:
+        unmarked = r["calendar_days"] - r["present_days"] - r["absent_days"]
+        total_computed += r["computed_pay"]
+        total_final += r["final_pay"]
+        row_style = ParagraphStyle("td", fontName=FONT, fontSize=8, leading=11)
+        row_style_r = ParagraphStyle("tdr", fontName=FONT, fontSize=8, leading=11, alignment=TA_RIGHT)
+        row_style_c = ParagraphStyle("tdc", fontName=FONT, fontSize=8, leading=11, alignment=TA_CENTER)
+        table_data.append([
+            Paragraph(r["employee_name"], row_style),
+            Paragraph(f"{r['monthly_salary']:,.2f}", row_style_r),
+            Paragraph(str(r["present_days"]), row_style_c),
+            Paragraph(str(r["absent_days"]), row_style_c),
+            Paragraph(str(unmarked), row_style_c),
+            Paragraph(f"{r['computed_pay']:,.2f}", row_style_r),
+            Paragraph(f"{r['final_pay']:,.2f}", row_style_r),
+            Paragraph(_PAYROLL_STATUS_LABEL.get(r["status"], r["status"]), row_style),
+        ])
+
+    table = Table(table_data, colWidths=col_widths, repeatRows=1)
+    table.setStyle(TableStyle([
+        ("BACKGROUND", (0, 0), (-1, 0), ACCENT_COLOR),
+        ("TEXTCOLOR", (0, 0), (-1, 0), BRAND_COLOR),
+        ("ROWBACKGROUNDS", (0, 1), (-1, -1), [colors.white, LIGHT_GRAY]),
+        ("GRID", (0, 0), (-1, -1), 0.5, MID_GRAY),
+        ("TOPPADDING", (0, 0), (-1, -1), 4),
+        ("BOTTOMPADDING", (0, 0), (-1, -1), 4),
+        ("LEFTPADDING", (0, 0), (-1, -1), 4),
+        ("RIGHTPADDING", (0, 0), (-1, -1), 4),
+        ("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
+    ]))
+    story.append(table)
+    story.append(Spacer(1, 4 * mm))
+
+    totals_data = [
+        ["", "Total Computed Pay", f"₹ {total_computed:,.2f}"],
+        ["", "Total Final Pay", f"₹ {total_final:,.2f}"],
+    ]
+    totals_table = Table(totals_data, colWidths=[115 * mm, 40 * mm, 45 * mm])
+    totals_table.setStyle(TableStyle([
+        ("ALIGN", (1, 0), (-1, -1), "RIGHT"),
+        ("FONTNAME", (0, 0), (-1, -1), FONT),
+        ("FONTNAME", (1, -1), (-1, -1), FONT_BOLD),
+        ("FONTSIZE", (0, 0), (-1, -1), 9),
+        ("FONTSIZE", (1, -1), (-1, -1), 10),
+        ("LINEABOVE", (1, -1), (-1, -1), 1, BRAND_COLOR),
+        ("TEXTCOLOR", (1, -1), (-1, -1), BRAND_COLOR),
+        ("TOPPADDING", (0, 0), (-1, -1), 3),
+        ("BOTTOMPADDING", (0, 0), (-1, -1), 3),
+    ]))
+    story.append(totals_table)
+
+    story.append(Spacer(1, 6 * mm))
+    story.append(HRFlowable(width="100%", thickness=0.5, color=MID_GRAY, spaceAfter=3))
+    story.append(Paragraph(
+        f"Generated on {datetime.now().strftime('%d %b %Y')}. This is a computer-generated payroll summary.",
+        ParagraphStyle("footer", fontName=FONT, fontSize=7, textColor=colors.HexColor("#999999"), alignment=TA_CENTER)
+    ))
+
+    doc.build(story)
+    return buffer.getvalue()
+
+
 def _fmt_num(n):
     if n == int(n):
         return str(int(n))

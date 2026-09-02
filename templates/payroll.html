@@ -6,6 +6,7 @@
   <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap">
     <select id="pr-month" class="input" style="max-width:150px" onchange="loadPayroll()"></select>
     <input type="number" id="pr-year" class="input" style="max-width:100px" onchange="loadPayroll()"/>
+    <button class="btn btn-outline" onclick="downloadPayrollPdf()">⬇ Download PDF</button>
     {% if session.is_admin %}
     <button class="btn btn-outline" onclick="generatePayroll()">Generate / Refresh</button>
     <button class="btn btn-primary" onclick="finalizePayroll()">Finalize & Send to Accountant</button>
@@ -202,6 +203,26 @@ async function markPaid(pid) {
   if (data.error) { alert(data.error); return; }
   showToast('Marked as paid');
   loadPayroll();
+}
+
+async function downloadPayrollPdf() {
+  const year = document.getElementById('pr-year').value;
+  const month = document.getElementById('pr-month').value;
+  const r = await fetch(`/api/payroll/export/pdf?year=${year}&month=${month}`);
+  if (!r.ok) {
+    const err = await r.json().catch(() => ({}));
+    alert(err.error || 'Could not generate the PDF');
+    return;
+  }
+  const blob = await r.blob();
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = `Payroll-${year}-${String(month).padStart(2,'0')}.pdf`;
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+  URL.revokeObjectURL(url);
 }
 
 function esc(s) { return String(s||'').replace(/&/g,'&amp;').replace(/"/g,'&quot;').replace(/</g,'&lt;'); }
