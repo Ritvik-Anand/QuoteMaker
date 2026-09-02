@@ -82,10 +82,10 @@
       <button class="btn-icon" onclick="closeModal('modal-bulk-make')">✕</button>
     </div>
     <div class="form-group">
-      <label>Supplier</label>
-      <select id="bulk-supplier-select" class="input" onchange="onBulkSupplierChange()">
-        <option value="">— Select a supplier —</option>
-      </select>
+      <label>Supplier / Make</label>
+      <input type="text" id="bulk-supplier-input" class="input" list="bulk-supplier-list"
+        placeholder="Type an existing make, or a new one to add it" onchange="onBulkSupplierChange()"/>
+      <datalist id="bulk-supplier-list"></datalist>
     </div>
     <div id="bulk-lines-wrap" style="max-height:55vh;overflow-y:auto;display:flex;flex-direction:column;gap:10px"></div>
   </div>
@@ -111,8 +111,10 @@
       <summary style="cursor:pointer;font-size:13px;font-weight:600;color:var(--accent)">+ Not in a catalog — add manually</summary>
       <div class="form-grid" style="margin-top:10px">
         <div class="form-group">
-          <label>Supplier</label>
-          <select id="opt-manual-supplier" class="input"></select>
+          <label>Supplier / Make</label>
+          <input type="text" id="opt-manual-supplier" class="input" list="opt-manual-supplier-list"
+            placeholder="Existing or new make name"/>
+          <datalist id="opt-manual-supplier-list"></datalist>
         </div>
         <div class="form-group">
           <label>List Price (₹)</label>
@@ -142,10 +144,7 @@ async function init() {
   allSuppliers = await fetch('/api/suppliers').then(r => r.json());
   document.getElementById('opt-supplier-filter').innerHTML =
     '<option value="">All suppliers</option>' + allSuppliers.map(s => `<option value="${s.id}">${esc(s.name)}</option>`).join('');
-  document.getElementById('opt-manual-supplier').innerHTML =
-    '<option value="">— None —</option>' + allSuppliers.map(s => `<option value="${s.id}">${esc(s.name)}</option>`).join('');
-  document.getElementById('bulk-supplier-select').innerHTML =
-    '<option value="">— Select a supplier —</option>' + allSuppliers.map(s => `<option value="${s.id}">${esc(s.name)}</option>`).join('');
+  refreshSupplierDatalists();
 
   if (PID) {
     document.getElementById('page-title').textContent = 'Edit Project';
@@ -167,6 +166,32 @@ async function init() {
     }));
   }
   render();
+}
+
+function refreshSupplierDatalists() {
+  const opts = allSuppliers.map(s => `<option value="${esc(s.name)}">`).join('');
+  document.getElementById('opt-manual-supplier-list').innerHTML = opts;
+  document.getElementById('bulk-supplier-list').innerHTML = opts;
+}
+
+// Looks up a supplier by exact (case-insensitive) name match; if the typed
+// name doesn't exist yet, creates it. This is how a brand-new make gets
+// added to the system — a project sheet has no other way to register one
+// (supplier/catalog management is admin-only), so typing it here has to work.
+async function resolveSupplierByName(name) {
+  name = (name || '').trim();
+  if (!name) return null;
+  const existing = allSuppliers.find(s => s.name.toLowerCase() === name.toLowerCase());
+  if (existing) return existing;
+  const r = await fetch('/api/suppliers', {
+    method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify({name})
+  });
+  const data = await r.json();
+  if (data.error) { alert(data.error); return null; }
+  const created = {id: data.id, name: data.name};
+  allSuppliers.push(created);
+  refreshSupplierDatalists();
+  return created;
 }
 
 function computePrice(base, adjType, adjVal) {
@@ -311,15 +336,16 @@ function addSearchOption(item) {
   render();
 }
 
-function addManualOption() {
+async function addManualOption() {
   const desc = document.getElementById('opt-manual-desc').value.trim();
   const price = parseFloat(document.getElementById('opt-manual-price').value) || 0;
-  const sid = document.getElementById('opt-manual-supplier').value;
+  const supplierName = document.getElementById('opt-manual-supplier').value.trim();
   if (!desc) { alert('Enter a description'); return; }
-  const supplier = allSuppliers.find(s => String(s.id) === sid);
+  const supplier = supplierName ? await resolveSupplierByName(supplierName) : null;
+  if (supplierName && !supplier) return; // supplier creation failed; error already shown
   const target = projectItems[addOptionTargetIdx];
   target.options.push({
-    supplier_id: sid ? Number(sid) : null, supplier_name: supplier ? supplier.name : '',
+    supplier_id: supplier ? supplier.id : null, supplier_name: supplier ? supplier.name : '',
     item_id: null, code: '', description: desc, unit: target.unit || 'Nos',
     list_price: price, purchase_adj_type: 'discount', purchase_adj_value: 0,
     sale_adj_type: target.sale_adj_type || 'discount', sale_adj_value: target.sale_adj_value || 0,
@@ -331,6 +357,7 @@ function addManualOption() {
 
 // ── Bulk "Add Make" — quote one supplier across every existing line ────────────
 let bulkSupplierId = null;
+let bulkSupplierName = '';
 let bulkSearchTimeouts = {};
 
 function openBulkAddMake() {
@@ -339,23 +366,33 @@ function openBulkAddMake() {
     return;
   }
   bulkSupplierId = null;
-  document.getElementById('bulk-supplier-select').value = '';
-  document.getElementById('bulk-lines-wrap').innerHTML = '<div class="empty-state">Pick a supplier above to start.</div>';
+  bulkSupplierName = '';
+  document.getElementById('bulk-supplier-input').value = '';
+  document.getElementById('bulk-lines-wrap').innerHTML = '<div class="empty-state">Type a supplier/make above to start — an existing one to reuse its catalog, or a new name to add it.</div>';
   showModal('modal-bulk-make');
+  setTimeout(() => document.getElementById('bulk-supplier-input').focus(), 100);
 }
 
 function onBulkSupplierChange() {
-  bulkSupplierId = document.getElementById('bulk-supplier-select').value;
-  if (!bulkSupplierId) {
-    document.getElementById('bulk-lines-wrap').innerHTML = '<div class="empty-state">Pick a supplier above to start.</div>';
+  bulkSupplierName = document.getElementById('bulk-supplier-input').value.trim();
+  if (!bulkSupplierName) {
+    bulkSupplierId = null;
+    document.getElementById('bulk-lines-wrap').innerHTML = '<div class="empty-state">Type a supplier/make above to start.</div>';
     return;
   }
+  // Only resolves against makes already known — a genuinely new name isn't
+  // created until it's actually used to add an item, so mistyping here
+  // never leaves an orphan supplier behind.
+  const existing = allSuppliers.find(s => s.name.toLowerCase() === bulkSupplierName.toLowerCase());
+  bulkSupplierId = existing ? existing.id : null;
   renderBulkLines();
 }
 
 function renderBulkLines() {
   const wrap = document.getElementById('bulk-lines-wrap');
-  wrap.innerHTML = projectItems.map((item, idx) => {
+  const isNewSupplier = !bulkSupplierId;
+  wrap.innerHTML = (isNewSupplier ? `<div class="sr-empty">"${esc(bulkSupplierName)}" isn't in the system yet — it'll be added as a new make the moment you add its first item below.</div>` : '')
+    + projectItems.map((item, idx) => {
     const existing = item.options.find(o => String(o.supplier_id) === String(bulkSupplierId));
     return `
       <div class="bulk-line">
@@ -363,14 +400,26 @@ function renderBulkLines() {
           <strong>${esc(item.description) || '(untitled line)'}</strong>
           ${existing ? `<span class="badge" style="background:var(--success-light,#dcfce7);color:var(--success,#16a34a)">Quoted: ₹${existing.list_price}</span>` : ''}
         </div>
+        ${isNewSupplier ? '' : `
         <input type="text" class="input-sm" placeholder="Search this supplier's catalog…" value="${esc(item.description)}" oninput="bulkSearchForLine(${idx}, this.value)"/>
         <div class="bulk-results" id="bulk-results-${idx}"></div>
+        `}
+        <details style="margin-top:6px">
+          <summary style="cursor:pointer;font-size:12px;font-weight:600;color:var(--accent)">+ Not in a catalog — add manually</summary>
+          <div class="bulk-manual-row">
+            <input type="text" class="input-sm" placeholder="Description" value="${esc(item.description)}" id="bulk-manual-desc-${idx}"/>
+            <input type="number" class="input-sm" placeholder="List ₹" min="0" step="0.01" id="bulk-manual-price-${idx}"/>
+            <button class="btn btn-sm btn-primary" onclick="bulkAddManual(${idx})">Add</button>
+          </div>
+        </details>
       </div>
     `;
   }).join('');
   // Auto-run a first search per line using its own description, so most
   // lines are one click away instead of needing to retype the spec.
-  projectItems.forEach((item, idx) => { if (item.description) bulkSearchForLine(idx, item.description); });
+  if (!isNewSupplier) {
+    projectItems.forEach((item, idx) => { if (item.description) bulkSearchForLine(idx, item.description); });
+  }
 }
 
 function bulkSearchForLine(idx, query) {
@@ -410,6 +459,34 @@ function bulkAttachOption(idx, catalogItem) {
     supplier_id: catalogItem.supplier_id, supplier_name: catalogItem.supplier_name, item_id: catalogItem.id,
     code: catalogItem.code || '', description: catalogItem.description, unit: catalogItem.unit || 'Nos',
     list_price: catalogItem.base_price, purchase_adj_type: 'discount', purchase_adj_value: 0,
+    sale_adj_type: existingSale ? existingSale.sale_adj_type : (item.sale_adj_type || 'discount'),
+    sale_adj_value: existingSale ? existingSale.sale_adj_value : (item.sale_adj_value || 0),
+  };
+  if (existingIdx >= 0) item.options[existingIdx] = newOption;
+  else {
+    item.options.push(newOption);
+    if (item.selected_option_index === -1) item.selected_option_index = item.options.length - 1;
+  }
+  renderBulkLines();
+  render();
+}
+
+async function bulkAddManual(idx) {
+  const desc = document.getElementById(`bulk-manual-desc-${idx}`).value.trim();
+  const price = parseFloat(document.getElementById(`bulk-manual-price-${idx}`).value) || 0;
+  if (!desc) { alert('Enter a description'); return; }
+  if (!bulkSupplierId) {
+    const supplier = await resolveSupplierByName(bulkSupplierName);
+    if (!supplier) return; // creation failed; error already shown
+    bulkSupplierId = supplier.id;
+  }
+  const item = projectItems[idx];
+  const existingIdx = item.options.findIndex(o => String(o.supplier_id) === String(bulkSupplierId));
+  const existingSale = existingIdx >= 0 ? item.options[existingIdx] : null;
+  const newOption = {
+    supplier_id: bulkSupplierId, supplier_name: bulkSupplierName, item_id: null,
+    code: '', description: desc, unit: item.unit || 'Nos',
+    list_price: price, purchase_adj_type: 'discount', purchase_adj_value: 0,
     sale_adj_type: existingSale ? existingSale.sale_adj_type : (item.sale_adj_type || 'discount'),
     sale_adj_value: existingSale ? existingSale.sale_adj_value : (item.sale_adj_value || 0),
   };
@@ -655,6 +732,9 @@ init();
 .bulk-line { border: 1px solid var(--border-soft); border-radius: var(--radius-sm); padding: 10px; }
 .bulk-line-head { display: flex; align-items: center; justify-content: space-between; gap: 8px; margin-bottom: 6px; flex-wrap: wrap; }
 .bulk-line input[type="text"] { width: 100%; }
+.bulk-manual-row { display: flex; gap: 8px; flex-wrap: wrap; margin-top: 8px; }
+.bulk-manual-row input[type="text"] { flex: 2; min-width: 140px; width: auto; }
+.bulk-manual-row input[type="number"] { flex: 1; min-width: 90px; }
 .bulk-results { margin-top: 6px; max-height: 160px; overflow-y: auto; }
 .bulk-results .sr-item { border: 1px solid var(--border-soft); border-radius: 6px; margin-bottom: 4px; }
 .spec-mismatch { margin-top: 4px; font-size: 11px; font-weight: 700; color: var(--danger); background: var(--danger-light); border-radius: 5px; padding: 2px 7px; display: inline-block; }

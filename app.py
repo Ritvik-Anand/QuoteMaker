@@ -285,8 +285,11 @@ def get_suppliers():
     return jsonify(rows)
 
 
+# Registering a bare supplier name is a lightweight action staff need while
+# building a project (adding a custom make that has no catalog yet) — kept
+# open to all staff, unlike catalog upload/parsing which stays admin-only.
 @app.route("/api/suppliers", methods=["POST"])
-@admin_required
+@login_required
 def create_supplier():
     data = request.json
     name = (data.get("name") or "").strip()
