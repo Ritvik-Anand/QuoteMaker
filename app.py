@@ -670,7 +670,11 @@ def list_clients():
 
     clients = []
     for r in rows:
-        cname = r["client_name"]
+        cname_raw = r["client_name"]
+        # Decode any URL-encoded names stored in DB (e.g. "Khalsa%20Electricals" → "Khalsa Electricals")
+        from urllib.parse import unquote
+        cname = unquote(cname_raw) if cname_raw else cname_raw
+
         q_rows = conn.execute("""
             SELECT q.id, q.gst_rate, q.cash_discount,
             COALESCE(SUM(qi.quantity * qi.final_price), 0) as subtotal
@@ -678,7 +682,7 @@ def list_clients():
             LEFT JOIN quotation_items qi ON qi.quotation_id = q.id
             WHERE LOWER(TRIM(q.client_name)) = LOWER(TRIM(?))
             GROUP BY q.id, q.gst_rate, q.cash_discount
-        """, (cname,)).fetchall()
+        """, (cname_raw,)).fetchall()
 
         total_val = 0.0
         for q in q_rows:
@@ -689,6 +693,7 @@ def list_clients():
             total_val += (taxable + gst)
 
         client_dict = dict(r)
+        client_dict["client_name"] = cname  # always return decoded name
         client_dict["total_value"] = round(total_val, 2)
         clients.append(client_dict)
 
@@ -728,9 +733,12 @@ def get_client_quotations(cname):
 @app.route("/api/clients/<path:cname>/detail", methods=["GET"])
 @login_required
 def get_client_detail(cname):
+    from urllib.parse import unquote
     conn = get_db()
-    cname_clean = cname.strip()
+    # Accept both encoded ("Khalsa%20Electricals") and plain ("Khalsa Electricals") names
+    cname_clean = unquote(cname.strip())
 
+    # Try exact decoded match first; also try the raw (possibly encoded) version as fallback
     q_rows = conn.execute("""
         SELECT q.id, q.quote_number, q.client_name, q.client_address, q.date, q.status, q.gst_rate, q.cash_discount,
         COUNT(qi.id) as item_count,
@@ -738,9 +746,10 @@ def get_client_detail(cname):
         FROM quotations q
         LEFT JOIN quotation_items qi ON qi.quotation_id = q.id
         WHERE LOWER(TRIM(q.client_name)) = LOWER(TRIM(?))
+           OR LOWER(TRIM(q.client_name)) = LOWER(TRIM(?))
         GROUP BY q.id, q.quote_number, q.client_name, q.client_address, q.date, q.status, q.gst_rate, q.cash_discount
         ORDER BY q.id DESC
-    """, (cname_clean,)).fetchall()
+    """, (cname_clean, cname.strip())).fetchall()
 
     quotes = []
     total_quoted_val = 0.0
@@ -790,8 +799,12 @@ def get_client_detail(cname):
 
     conn.close()
 
+    # Use the actual stored name from DB rows (decoded), or fall back to the decoded URL param
+    from urllib.parse import unquote
+    display_name = unquote(quotes[0]["client_name"]) if quotes else (unquote(orders[0]["client_name"]) if orders else cname_clean)
+
     return jsonify({
-        "client_name": cname_clean,
+        "client_name": display_name,
         "client_address": client_address,
         "summary": {
             "quote_count": len(quotes),
@@ -804,6 +817,25 @@ def get_client_detail(cname):
         "quotations": quotes,
         "orders": orders
     })
+
+
+@app.route("/api/admin/fix-client-names", methods=["POST"])
+@login_required
+def fix_client_names():
+    """One-shot migration: decode URL-encoded client names stored in the DB."""
+    from urllib.parse import unquote
+    conn = get_db()
+    updated = 0
+    for table in ("quotations", "orders"):
+        rows = conn.execute(f"SELECT id, client_name FROM {table} WHERE client_name LIKE '%25%' OR client_name LIKE '%\\+%'").fetchall()
+        for row in rows:
+            decoded = unquote(row["client_name"])
+            if decoded != row["client_name"]:
+                conn.execute(f"UPDATE {table} SET client_name = ? WHERE id = ?", (decoded, row["id"]))
+                updated += 1
+    conn.commit() if hasattr(conn, 'commit') else None
+    conn.close()
+    return jsonify({"status": "ok", "updated": updated})
 
 
 @app.route("/api/quotations/next-number", methods=["GET"])
