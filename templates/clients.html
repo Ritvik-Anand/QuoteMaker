@@ -90,14 +90,25 @@ async function loadClients() {
   const urlParams = new URLSearchParams(window.location.search);
   const autoClient = urlParams.get('name');
 
-  const res = await fetch('/api/clients');
-  allClients = await res.json();
-  
+  try {
+    const res = await fetch('/api/clients');
+    const data = await res.json();
+    if (Array.isArray(data)) {
+      allClients = data;
+    } else {
+      console.error('Error fetching clients:', data);
+      allClients = [];
+    }
+  } catch (e) {
+    console.error('Network error fetching clients:', e);
+    allClients = [];
+  }
+
   updateKPIs(allClients);
   renderClients(allClients);
 
-  if (autoClient) {
-    const found = allClients.find(c => c.client_name.toLowerCase().trim() === autoClient.toLowerCase().trim());
+  if (autoClient && allClients.length) {
+    const found = allClients.find(c => c.client_name && c.client_name.toLowerCase().trim() === autoClient.toLowerCase().trim());
     if (found) {
       openClientHistory(found.client_name, found.client_address);
     }
@@ -158,8 +169,14 @@ async function openClientHistory(clientName, clientAddress) {
   const tbody = document.getElementById('modal-quotes-tbody');
   tbody.innerHTML = '<tr><td colspan="6" class="empty-state">Loading quotations…</td></tr>';
 
-  const res = await fetch(`/api/clients/${encodeURIComponent(clientName)}/quotations`);
-  const quotes = await res.json();
+  let quotes = [];
+  try {
+    const res = await fetch(`/api/clients/${encodeURIComponent(clientName)}/quotations`);
+    const data = await res.json();
+    if (Array.isArray(data)) quotes = data;
+  } catch (e) {
+    console.error('Error loading client quotes:', e);
+  }
 
   if (!quotes.length) {
     tbody.innerHTML = '<tr><td colspan="6" class="empty-state">No quotations found for this client.</td></tr>';

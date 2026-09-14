@@ -656,14 +656,14 @@ def list_clients():
     conn = get_db()
     rows = conn.execute("""
         SELECT 
-            TRIM(q.client_name) as client_name,
+            MAX(q.client_name) as client_name,
             MAX(q.client_address) as client_address,
             COUNT(DISTINCT q.id) as quote_count,
-            COUNT(DISTINCT CASE WHEN q.status = 'accepted' THEN q.id END) as accepted_count,
+            COUNT(DISTINCT CASE WHEN q.status = 'accepted' THEN q.id ELSE NULL END) as accepted_count,
             MAX(q.date) as last_quote_date,
             MAX(q.created_at) as latest_created
         FROM quotations q
-        WHERE TRIM(q.client_name) != ''
+        WHERE q.client_name IS NOT NULL AND TRIM(q.client_name) != ''
         GROUP BY LOWER(TRIM(q.client_name))
         ORDER BY latest_created DESC
     """).fetchall()
@@ -677,7 +677,7 @@ def list_clients():
             FROM quotations q
             LEFT JOIN quotation_items qi ON qi.quotation_id = q.id
             WHERE LOWER(TRIM(q.client_name)) = LOWER(TRIM(?))
-            GROUP BY q.id
+            GROUP BY q.id, q.gst_rate, q.cash_discount
         """, (cname,)).fetchall()
 
         total_val = 0.0
@@ -701,12 +701,13 @@ def list_clients():
 def get_client_quotations(cname):
     conn = get_db()
     rows = conn.execute("""
-        SELECT q.*, COUNT(qi.id) as item_count,
+        SELECT q.id, q.quote_number, q.client_name, q.client_address, q.date, q.status, q.gst_rate, q.cash_discount,
+        COUNT(qi.id) as item_count,
         COALESCE(SUM(qi.quantity * qi.final_price), 0) as subtotal
         FROM quotations q
         LEFT JOIN quotation_items qi ON qi.quotation_id = q.id
         WHERE LOWER(TRIM(q.client_name)) = LOWER(TRIM(?))
-        GROUP BY q.id
+        GROUP BY q.id, q.quote_number, q.client_name, q.client_address, q.date, q.status, q.gst_rate, q.cash_discount
         ORDER BY q.id DESC
     """, (cname.strip(),)).fetchall()
 
