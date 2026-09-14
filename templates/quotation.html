@@ -38,9 +38,10 @@
           <label>Date</label>
           <input type="date" id="quote-date" class="input" />
         </div>
-        <div class="form-group">
+        <div class="form-group" style="position:relative">
           <label>Client Name</label>
-          <input type="text" id="client-name" class="input" placeholder="Client / Company name" />
+          <input type="text" id="client-name" class="input" placeholder="Client / Company name" oninput="onClientInput()" onfocus="onClientInput()" autocomplete="off" />
+          <div id="client-autocomplete" class="search-results hidden" style="position:absolute; top:100%; left:0; right:0; z-index:150; max-height:220px; overflow-y:auto; background:var(--card); border:1px solid var(--border); border-radius:8px; box-shadow:var(--shadow-md); margin-top:4px;"></div>
         </div>
         <div class="form-group">
           <label>GST Rate (%)</label>
@@ -142,10 +143,12 @@ const QID = {{ qid|default('null') }};
 let quoteItems = [];
 let quoteTags = [];
 let searchTimeout = null;
+let clientList = [];
 
 // ── Init ──────────────────────────────────────────────────────────────────────
 async function init() {
   document.getElementById('quote-date').value = new Date().toISOString().split('T')[0];
+  await loadClientsCache();
 
   const suppliers = await fetch('/api/suppliers').then(r => r.json());
   const sel = document.getElementById('supplier-filter');
@@ -207,6 +210,84 @@ async function init() {
   });
   tagInput.addEventListener('blur', addTagFromInput);
 }
+
+// ── Client Autocomplete & New Client Profile ──────────────────────────────────
+async function loadClientsCache() {
+  try {
+    const res = await fetch('/api/clients');
+    clientList = await res.json();
+  } catch (e) {
+    console.error('Failed to load clients', e);
+  }
+}
+
+function onClientInput() {
+  const input = document.getElementById('client-name');
+  const val = input.value.trim().toLowerCase();
+  const dropdown = document.getElementById('client-autocomplete');
+
+  if (!clientList || (!clientList.length && !val)) {
+    dropdown.classList.add('hidden');
+    return;
+  }
+
+  const matches = val ? clientList.filter(c => c.client_name.toLowerCase().includes(val)) : clientList;
+  const exactMatch = clientList.some(c => c.client_name.toLowerCase() === val);
+
+  let html = '';
+
+  if (matches.length > 0) {
+    html += matches.slice(0, 6).map(c => `
+      <div class="search-result-item" style="padding:10px 12px; cursor:pointer; border-bottom:1px solid var(--border-soft);" onclick="selectClient('${escQuote(c.client_name)}', '${escQuote(c.client_address || '')}')">
+        <div style="display:flex; justify-content:space-between; align-items:center;">
+          <strong>${esc(c.client_name)}</strong>
+          <span class="badge" style="font-size:11px">${c.quote_count} ${c.quote_count === 1 ? 'quote' : 'quotes'}</span>
+        </div>
+        ${c.client_address ? `<div style="font-size:12px; color:var(--text-muted); text-overflow:ellipsis; overflow:hidden; white-space:nowrap; margin-top:2px;">${esc(c.client_address)}</div>` : ''}
+      </div>
+    `).join('');
+  }
+
+  if (val && !exactMatch) {
+    html += `
+      <div class="search-result-item" style="padding:10px 12px; cursor:pointer; background:var(--accent-light); color:var(--accent); font-weight:600;" onclick="selectNewClient('${escQuote(input.value.trim())}')">
+        ✨ Add "${esc(input.value.trim())}" as new client profile
+      </div>
+    `;
+  }
+
+  if (!html) {
+    dropdown.classList.add('hidden');
+    return;
+  }
+
+  dropdown.innerHTML = html;
+  dropdown.classList.remove('hidden');
+}
+
+function selectClient(name, address) {
+  document.getElementById('client-name').value = name;
+  if (address) {
+    document.getElementById('client-address').value = address;
+  }
+  document.getElementById('client-autocomplete').classList.add('hidden');
+}
+
+function selectNewClient(name) {
+  document.getElementById('client-name').value = name;
+  document.getElementById('client-autocomplete').classList.add('hidden');
+  document.getElementById('client-address').focus();
+}
+
+function escQuote(s) { return String(s||'').replace(/'/g, "\\'"); }
+
+document.addEventListener('click', (e) => {
+  const dropdown = document.getElementById('client-autocomplete');
+  const input = document.getElementById('client-name');
+  if (dropdown && !dropdown.contains(e.target) && e.target !== input) {
+    dropdown.classList.add('hidden');
+  }
+});
 
 // ── Tags ──────────────────────────────────────────────────────────────────────
 function renderTags() {
