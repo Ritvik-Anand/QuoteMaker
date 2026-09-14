@@ -29,6 +29,7 @@
         <a href="/catalogs" class="nav-link {% if request.path == '/catalogs' %}active{% endif %}">Catalogs</a>
         {% endif %}
         <a href="/history" class="nav-link {% if request.path == '/history' %}active{% endif %}">History</a>
+        <a href="/clients" class="nav-link {% if request.path.startswith('/clients') %}active{% endif %}">Clients</a>
         <a href="/projects" class="nav-link {% if request.path.startswith('/projects') %}active{% endif %}">Projects</a>
         <a href="/orders" class="nav-link {% if request.path.startswith('/orders') %}active{% endif %}">Orders</a>
         {% if session.is_admin or session.role == 'ops' %}
@@ -65,6 +66,7 @@
       <a href="/catalogs" class="mobile-drawer-link {% if request.path == '/catalogs' %}active{% endif %}">Catalogs</a>
       {% endif %}
       <a href="/history" class="mobile-drawer-link {% if request.path == '/history' %}active{% endif %}">History</a>
+      <a href="/clients" class="mobile-drawer-link {% if request.path.startswith('/clients') %}active{% endif %}">Clients</a>
       <a href="/projects" class="mobile-drawer-link {% if request.path.startswith('/projects') %}active{% endif %}">Projects</a>
       <a href="/orders" class="mobile-drawer-link {% if request.path.startswith('/orders') %}active{% endif %}">Orders</a>
       {% if session.is_admin or session.role == 'ops' %}

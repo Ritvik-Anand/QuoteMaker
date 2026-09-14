@@ -222,6 +222,12 @@ def history_page():
     return render_template("history.html")
 
 
+@app.route("/clients")
+@login_required
+def clients_page():
+    return render_template("clients.html")
+
+
 @app.route("/projects")
 @login_required
 def projects_page():
@@ -642,6 +648,80 @@ def list_quotations():
     ).fetchall()
     conn.close()
     return jsonify(rows)
+
+
+@app.route("/api/clients", methods=["GET"])
+@login_required
+def list_clients():
+    conn = get_db()
+    rows = conn.execute("""
+        SELECT 
+            TRIM(q.client_name) as client_name,
+            MAX(q.client_address) as client_address,
+            COUNT(DISTINCT q.id) as quote_count,
+            COUNT(DISTINCT CASE WHEN q.status = 'accepted' THEN q.id END) as accepted_count,
+            MAX(q.date) as last_quote_date,
+            MAX(q.created_at) as latest_created
+        FROM quotations q
+        WHERE TRIM(q.client_name) != ''
+        GROUP BY LOWER(TRIM(q.client_name))
+        ORDER BY latest_created DESC
+    """).fetchall()
+
+    clients = []
+    for r in rows:
+        cname = r["client_name"]
+        q_rows = conn.execute("""
+            SELECT q.id, q.gst_rate, q.cash_discount,
+            COALESCE(SUM(qi.quantity * qi.final_price), 0) as subtotal
+            FROM quotations q
+            LEFT JOIN quotation_items qi ON qi.quotation_id = q.id
+            WHERE LOWER(TRIM(q.client_name)) = LOWER(TRIM(?))
+            GROUP BY q.id
+        """, (cname,)).fetchall()
+
+        total_val = 0.0
+        for q in q_rows:
+            sub = float(q["subtotal"] or 0)
+            disc = round(sub * 0.01, 2) if q.get("cash_discount") else 0
+            taxable = sub - disc
+            gst = round(taxable * float(q.get("gst_rate") or 18) / 100, 2)
+            total_val += (taxable + gst)
+
+        client_dict = dict(r)
+        client_dict["total_value"] = round(total_val, 2)
+        clients.append(client_dict)
+
+    conn.close()
+    return jsonify(clients)
+
+
+@app.route("/api/clients/<path:cname>/quotations", methods=["GET"])
+@login_required
+def get_client_quotations(cname):
+    conn = get_db()
+    rows = conn.execute("""
+        SELECT q.*, COUNT(qi.id) as item_count,
+        COALESCE(SUM(qi.quantity * qi.final_price), 0) as subtotal
+        FROM quotations q
+        LEFT JOIN quotation_items qi ON qi.quotation_id = q.id
+        WHERE LOWER(TRIM(q.client_name)) = LOWER(TRIM(?))
+        GROUP BY q.id
+        ORDER BY q.id DESC
+    """, (cname.strip(),)).fetchall()
+
+    quotes = []
+    for q in rows:
+        qd = dict(q)
+        sub = float(qd["subtotal"] or 0)
+        disc = round(sub * 0.01, 2) if qd.get("cash_discount") else 0
+        taxable = sub - disc
+        gst = round(taxable * float(qd.get("gst_rate") or 18) / 100, 2)
+        qd["total"] = round(taxable + gst, 2)
+        quotes.append(qd)
+
+    conn.close()
+    return jsonify(quotes)
 
 
 @app.route("/api/quotations/next-number", methods=["GET"])

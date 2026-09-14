@@ -1,0 +1,196 @@
+{% extends "base.html" %}
+{% block title %}Clients{% endblock %}
+{% block content %}
+<div class="page-header">
+  <div>
+    <h1>Clients</h1>
+    <p class="page-subtitle">View client portfolio and quotation history per client</p>
+  </div>
+  <div class="header-actions">
+    <input type="text" id="client-search" class="input" placeholder="Search clients…" style="width:240px" oninput="filterClients()"/>
+  </div>
+</div>
+
+<div class="card" style="margin-bottom:20px">
+  <div style="display:grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap:16px;">
+    <div>
+      <div style="font-size:12px; font-weight:600; text-transform:uppercase; color:var(--text-muted); letter-spacing:0.05em">Total Clients</div>
+      <div id="kpi-total-clients" style="font-size:24px; font-weight:800; color:var(--brand); margin-top:4px">0</div>
+    </div>
+    <div>
+      <div style="font-size:12px; font-weight:600; text-transform:uppercase; color:var(--text-muted); letter-spacing:0.05em">Total Quotes</div>
+      <div id="kpi-total-quotes" style="font-size:24px; font-weight:800; color:var(--brand); margin-top:4px">0</div>
+    </div>
+    <div>
+      <div style="font-size:12px; font-weight:600; text-transform:uppercase; color:var(--text-muted); letter-spacing:0.05em">Total Quoted Value</div>
+      <div id="kpi-total-value" style="font-size:24px; font-weight:800; color:var(--accent); margin-top:4px">₹ 0.00</div>
+    </div>
+  </div>
+</div>
+
+<div class="card">
+  <div class="table-wrap">
+    <table class="data-table">
+      <thead>
+        <tr>
+          <th>Client Name</th>
+          <th>Address</th>
+          <th>Quotations</th>
+          <th>Accepted</th>
+          <th>Total Quoted ₹</th>
+          <th>Last Quote Date</th>
+          <th style="width:120px">Actions</th>
+        </tr>
+      </thead>
+      <tbody id="clients-tbody">
+        <tr><td colspan="7" class="empty-state">Loading client directory…</td></tr>
+      </tbody>
+    </table>
+  </div>
+</div>
+
+<!-- Client History Modal -->
+<div class="modal-overlay hidden" id="client-modal" onclick="if(event.target===this) closeModal()">
+  <div class="modal" style="max-width:850px; width:95%">
+    <div class="modal-header">
+      <div>
+        <h2 id="modal-client-name" style="margin:0; font-size:18px; color:var(--brand)">Client Quotations</h2>
+        <div id="modal-client-address" style="font-size:13px; color:var(--text-muted); margin-top:2px"></div>
+      </div>
+      <button class="modal-close" onclick="closeModal()">&times;</button>
+    </div>
+    <div class="modal-body" style="padding:16px 20px">
+      <div class="table-wrap">
+        <table class="data-table">
+          <thead>
+            <tr>
+              <th>Quote #</th>
+              <th>Date</th>
+              <th>Items</th>
+              <th>Total ₹</th>
+              <th>Status</th>
+              <th style="width:140px">Actions</th>
+            </tr>
+          </thead>
+          <tbody id="modal-quotes-tbody">
+            <tr><td colspan="6" class="empty-state">Loading quotations…</td></tr>
+          </tbody>
+        </table>
+      </div>
+    </div>
+  </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+let allClients = [];
+
+async function loadClients() {
+  const urlParams = new URLSearchParams(window.location.search);
+  const autoClient = urlParams.get('name');
+
+  const res = await fetch('/api/clients');
+  allClients = await res.json();
+  
+  updateKPIs(allClients);
+  renderClients(allClients);
+
+  if (autoClient) {
+    const found = allClients.find(c => c.client_name.toLowerCase().trim() === autoClient.toLowerCase().trim());
+    if (found) {
+      openClientHistory(found.client_name, found.client_address);
+    }
+  }
+}
+
+function updateKPIs(clients) {
+  const totalClients = clients.length;
+  const totalQuotes = clients.reduce((acc, c) => acc + (c.quote_count || 0), 0);
+  const totalValue = clients.reduce((acc, c) => acc + (c.total_value || 0), 0);
+
+  document.getElementById('kpi-total-clients').textContent = totalClients;
+  document.getElementById('kpi-total-quotes').textContent = totalQuotes;
+  document.getElementById('kpi-total-value').textContent = fmtMoney(totalValue);
+}
+
+function renderClients(clients) {
+  const tbody = document.getElementById('clients-tbody');
+  if (!clients.length) {
+    tbody.innerHTML = '<tr><td colspan="7" class="empty-state">No client records found.</td></tr>';
+    return;
+  }
+
+  tbody.innerHTML = clients.map(c => `
+    <tr>
+      <td><strong>${esc(c.client_name)}</strong></td>
+      <td>${esc(c.client_address || '—')}</td>
+      <td><span class="badge">${c.quote_count} ${c.quote_count === 1 ? 'quote' : 'quotes'}</span></td>
+      <td>${c.accepted_count > 0 ? `<span class="badge badge-success">${c.accepted_count} accepted</span>` : '<span style="color:var(--text-faint)">0</span>'}</td>
+      <td><strong>${fmtMoney(c.total_value)}</strong></td>
+      <td>${esc(c.last_quote_date || '—')}</td>
+      <td>
+        <button class="btn btn-sm" onclick="openClientHistory('${escQuote(c.client_name)}', '${escQuote(c.client_address || '')}')">View History</button>
+      </td>
+    </tr>
+  `).join('');
+}
+
+function filterClients() {
+  const q = document.getElementById('client-search').value.toLowerCase().trim();
+  if (!q) {
+    renderClients(allClients);
+    return;
+  }
+  const filtered = allClients.filter(c => 
+    c.client_name.toLowerCase().includes(q) || 
+    (c.client_address && c.client_address.toLowerCase().includes(q))
+  );
+  renderClients(filtered);
+}
+
+async function openClientHistory(clientName, clientAddress) {
+  document.getElementById('modal-client-name').textContent = clientName;
+  document.getElementById('modal-client-address').textContent = clientAddress || '';
+  const modal = document.getElementById('client-modal');
+  modal.classList.remove('hidden');
+
+  const tbody = document.getElementById('modal-quotes-tbody');
+  tbody.innerHTML = '<tr><td colspan="6" class="empty-state">Loading quotations…</td></tr>';
+
+  const res = await fetch(`/api/clients/${encodeURIComponent(clientName)}/quotations`);
+  const quotes = await res.json();
+
+  if (!quotes.length) {
+    tbody.innerHTML = '<tr><td colspan="6" class="empty-state">No quotations found for this client.</td></tr>';
+    return;
+  }
+
+  tbody.innerHTML = quotes.map(q => `
+    <tr>
+      <td><a href="/quotation/${q.id}/edit" class="link-sm"><strong>${esc(q.quote_number)}</strong></a></td>
+      <td>${esc(q.date)}</td>
+      <td>${q.item_count} ${q.item_count === 1 ? 'item' : 'items'}</td>
+      <td><strong>${fmtMoney(q.total)}</strong></td>
+      <td>
+        ${q.status === 'accepted' ? '<span class="badge badge-success">Accepted</span>' : '<span class="badge">Draft</span>'}
+      </td>
+      <td class="actions-cell">
+        <a href="/quotation/${q.id}/edit" class="btn btn-sm">Edit</a>
+        <a href="/api/quotations/${q.id}/export/pdf" class="btn btn-sm btn-outline" target="_blank">PDF</a>
+      </td>
+    </tr>
+  `).join('');
+}
+
+function closeModal() {
+  document.getElementById('client-modal').classList.add('hidden');
+}
+
+function fmtMoney(n) { return '₹ ' + Number(n||0).toLocaleString('en-IN', {minimumFractionDigits: 2, maximumFractionDigits: 2}); }
+function esc(s) { return String(s||'').replace(/&/g,'&amp;').replace(/"/g,'&quot;').replace(/</g,'&lt;'); }
+function escQuote(s) { return String(s||'').replace(/'/g, "\\'"); }
+
+loadClients();
+</script>
+{% endblock %}

@@ -101,7 +101,7 @@ function renderQuotes(quotes) {
     return `
     <tr>
       <td><strong>${esc(q.quote_number)}</strong></td>
-      <td>${esc(q.client_name)}</td>
+      <td><a href="/clients?name=${encodeURIComponent(q.client_name)}" class="link-sm" title="View all quotes for this client">${esc(q.client_name)}</a></td>
       <td>${esc(q.date)}</td>
       <td><span class="badge">${q.item_count} items</span></td>
       <td>${(q.tags || '').split(',').map(t => t.trim()).filter(Boolean).map(t => `<span class="badge tag-badge">${esc(t)}</span>`).join(' ') || '—'}</td>
