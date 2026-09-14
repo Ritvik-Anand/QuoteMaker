@@ -7,6 +7,7 @@
     <div class="attribution" id="ord-quote-link" style="margin-top:5px"></div>
   </div>
   <div class="header-actions">
+    <button class="btn danger" onclick="deleteOrder()">🗑️ Delete Order</button>
     <button class="btn btn-primary" onclick="saveOrder()">💾 Save Supply Progress</button>
   </div>
 </div>
@@ -197,6 +198,15 @@ async function deletePayment(pid) {
   if (!confirm('Remove this payment record?')) return;
   await fetch(`/api/orders/${OID}/payments/${pid}`, {method: 'DELETE'});
   load();
+}
+
+async function deleteOrder() {
+  const quoteNum = orderData?.order?.quote_number || '';
+  if (!confirm(`Are you sure you want to delete Order ${quoteNum}? This action cannot be undone.`)) return;
+  const res = await fetch(`/api/orders/${OID}`, { method: 'DELETE' });
+  const data = await res.json();
+  if (data.error) { alert(data.error); return; }
+  window.location.href = '/orders';
 }
 
 function fmtMoney(n) { return '₹ ' + Number(n||0).toLocaleString('en-IN', {minimumFractionDigits: 2, maximumFractionDigits: 2}); }

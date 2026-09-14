@@ -53,7 +53,10 @@ async function loadOrders() {
       <td>${fmt(o.paid_amount)}</td>
       <td>${o.balance > 0 ? fmt(o.balance) : '<span style="color:var(--text-faint)">Paid in full</span>'}</td>
       <td>${statusBadge(o)}</td>
-      <td class="actions-cell"><a href="/orders/${o.id}" class="btn btn-sm">Open</a></td>
+      <td class="actions-cell">
+        <a href="/orders/${o.id}" class="btn btn-sm">Open</a>
+        <button class="btn btn-sm danger" onclick="deleteOrder(${o.id}, '${esc(o.quote_number)}')">Delete</button>
+      </td>
     </tr>
   `).join('');
 
@@ -72,9 +75,18 @@ async function loadOrders() {
       </div>
       <div class="ord-card-actions">
         <a href="/orders/${o.id}" class="btn btn-sm">Open</a>
+        <button class="btn btn-sm danger" onclick="deleteOrder(${o.id}, '${esc(o.quote_number)}')">Delete</button>
       </div>
     </div>
   `).join('');
+}
+
+async function deleteOrder(oid, quoteNum) {
+  if (!confirm(`Delete order ${quoteNum}? This action cannot be undone.`)) return;
+  const res = await fetch(`/api/orders/${oid}`, { method: 'DELETE' });
+  const data = await res.json();
+  if (data.error) { alert(data.error); return; }
+  loadOrders();
 }
 
 function esc(s) { return String(s||'').replace(/&/g,'&amp;').replace(/"/g,'&quot;').replace(/</g,'&lt;'); }

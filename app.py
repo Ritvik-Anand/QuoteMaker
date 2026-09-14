@@ -1509,6 +1509,12 @@ def update_order(oid):
 @login_required
 def delete_order(oid):
     conn = get_db()
+    order = conn.execute("SELECT quotation_id FROM orders WHERE id=?", (oid,)).fetchone()
+    if order and order.get("quotation_id"):
+        conn.execute(
+            "UPDATE quotations SET status='draft', accepted_by='', accepted_at=NULL WHERE id=?",
+            (order["quotation_id"],)
+        )
     conn.execute("DELETE FROM orders WHERE id=?", (oid,))
     conn.commit()
     conn.close()
