@@ -50,16 +50,16 @@
 </div>
 
 <!-- Client History Modal -->
-<div class="modal-overlay hidden" id="client-modal" onclick="if(event.target===this) closeModal()">
-  <div class="modal" style="max-width:850px; width:95%">
+<div id="client-modal" class="modal hidden" onclick="if(event.target===this) closeModal()">
+  <div class="modal-box modal-wide" style="max-width:850px; width:95%">
     <div class="modal-header">
       <div>
-        <h2 id="modal-client-name" style="margin:0; font-size:18px; color:var(--brand)">Client Quotations</h2>
+        <h3 id="modal-client-name">Client Quotations</h3>
         <div id="modal-client-address" style="font-size:13px; color:var(--text-muted); margin-top:2px"></div>
       </div>
-      <button class="modal-close" onclick="closeModal()">&times;</button>
+      <button class="btn-icon" onclick="closeModal()" style="font-size:20px">&times;</button>
     </div>
-    <div class="modal-body" style="padding:16px 20px">
+    <div class="modal-body" style="padding:10px 0">
       <div class="table-wrap">
         <table class="data-table">
           <thead>
