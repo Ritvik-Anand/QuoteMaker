@@ -826,15 +826,23 @@ def fix_client_names():
     from urllib.parse import unquote
     conn = get_db()
     updated = 0
-    for table in ("quotations", "orders"):
-        rows = conn.execute(f"SELECT id, client_name FROM {table} WHERE client_name LIKE '%25%' OR client_name LIKE '%\\+%'").fetchall()
-        for row in rows:
-            decoded = unquote(row["client_name"])
-            if decoded != row["client_name"]:
-                conn.execute(f"UPDATE {table} SET client_name = ? WHERE id = ?", (decoded, row["id"]))
-                updated += 1
-    conn.commit() if hasattr(conn, 'commit') else None
-    conn.close()
+    try:
+        for table in ("quotations", "orders"):
+            # Fetch all rows — decode in Python, no fragile SQL LIKE
+            rows = conn.execute(f"SELECT id, client_name FROM {table}").fetchall()
+            for row in rows:
+                name = row["client_name"]
+                if not name:
+                    continue
+                decoded = unquote(name)
+                if decoded != name:
+                    conn.execute(
+                        f"UPDATE {table} SET client_name = ? WHERE id = ?",
+                        (decoded, row["id"])
+                    )
+                    updated += 1
+    finally:
+        conn.close()
     return jsonify({"status": "ok", "updated": updated})
 
 
