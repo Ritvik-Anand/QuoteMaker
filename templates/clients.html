@@ -1,10 +1,22 @@
 {% extends "base.html" %}
 {% block title %}Clients{% endblock %}
 {% block content %}
+<style>
+.client-row { cursor: pointer; transition: background .15s var(--ease); }
+.client-row:hover { background: var(--accent-light) !important; }
+.tab-nav { display: flex; gap: 8px; border-bottom: 1px solid var(--border-soft); margin-bottom: 16px; }
+.tab-btn { padding: 8px 16px; border: none; background: none; font-weight: 600; font-size: 13.5px; color: var(--text-muted); cursor: pointer; border-bottom: 2px solid transparent; transition: color .15s, border-color .15s; }
+.tab-btn:hover { color: var(--brand); }
+.tab-btn.active { color: var(--accent); border-bottom-color: var(--accent); }
+.summary-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(140px, 1fr)); gap: 12px; margin-bottom: 16px; background: var(--bg); padding: 14px; border-radius: var(--radius); border: 1px solid var(--border-soft); }
+.summary-stat-label { font-size: 11px; font-weight: 600; text-transform: uppercase; color: var(--text-muted); letter-spacing: 0.04em; }
+.summary-stat-val { font-size: 16px; font-weight: 800; color: var(--brand); margin-top: 2px; }
+</style>
+
 <div class="page-header">
   <div>
     <h1>Clients</h1>
-    <p class="page-subtitle">View client portfolio and quotation history per client</p>
+    <p class="page-subtitle">Click any client row to view their profile, quotations, orders, and ledger</p>
   </div>
   <div class="header-actions">
     <input type="text" id="client-search" class="input" placeholder="Search clients…" style="width:240px" oninput="filterClients()"/>
@@ -36,46 +48,98 @@
           <th>Client Name</th>
           <th>Address</th>
           <th>Quotations</th>
-          <th>Accepted</th>
+          <th>Accepted Orders</th>
           <th>Total Quoted ₹</th>
           <th>Last Quote Date</th>
-          <th style="width:120px">Actions</th>
         </tr>
       </thead>
       <tbody id="clients-tbody">
-        <tr><td colspan="7" class="empty-state">Loading client directory…</td></tr>
+        <tr><td colspan="6" class="empty-state">Loading client directory…</td></tr>
       </tbody>
     </table>
   </div>
 </div>
 
-<!-- Client History Modal -->
+<!-- Client Profile Modal -->
 <div id="client-modal" class="modal hidden" onclick="if(event.target===this) closeModal()">
-  <div class="modal-box modal-wide" style="max-width:850px; width:95%">
+  <div class="modal-box modal-wide" style="max-width:900px; width:95%">
     <div class="modal-header">
       <div>
-        <h3 id="modal-client-name">Client Quotations</h3>
+        <h3 id="modal-client-name" style="font-size:20px; font-weight:800; color:var(--brand)">Client Profile</h3>
         <div id="modal-client-address" style="font-size:13px; color:var(--text-muted); margin-top:2px"></div>
       </div>
-      <button class="btn-icon" onclick="closeModal()" style="font-size:20px">&times;</button>
+      <button class="btn-icon" onclick="closeModal()" style="font-size:22px">&times;</button>
     </div>
-    <div class="modal-body" style="padding:10px 0">
-      <div class="table-wrap">
-        <table class="data-table">
-          <thead>
-            <tr>
-              <th>Quote #</th>
-              <th>Date</th>
-              <th>Items</th>
-              <th>Total ₹</th>
-              <th>Status</th>
-              <th style="width:140px">Actions</th>
-            </tr>
-          </thead>
-          <tbody id="modal-quotes-tbody">
-            <tr><td colspan="6" class="empty-state">Loading quotations…</td></tr>
-          </tbody>
-        </table>
+
+    <!-- Client Financial Overview Cards -->
+    <div class="summary-grid" id="modal-summary-grid">
+      <div>
+        <div class="summary-stat-label">Total Quoted</div>
+        <div class="summary-stat-val" id="stat-quoted">₹ 0.00</div>
+      </div>
+      <div>
+        <div class="summary-stat-label">Total Orders</div>
+        <div class="summary-stat-val" id="stat-ordered">₹ 0.00</div>
+      </div>
+      <div>
+        <div class="summary-stat-label">Payments Received</div>
+        <div class="summary-stat-val" style="color:var(--success)" id="stat-paid">₹ 0.00</div>
+      </div>
+      <div>
+        <div class="summary-stat-label">Balance Outstanding</div>
+        <div class="summary-stat-val" style="color:var(--danger)" id="stat-balance">₹ 0.00</div>
+      </div>
+    </div>
+
+    <!-- Tabs Navigation -->
+    <div class="tab-nav">
+      <button class="tab-btn active" id="tab-btn-quotes" onclick="switchTab('quotes')">Quotations <span class="badge" id="badge-quotes-count">0</span></button>
+      <button class="tab-btn" id="tab-btn-orders" onclick="switchTab('orders')">Accepted Orders <span class="badge" id="badge-orders-count">0</span></button>
+    </div>
+
+    <div class="modal-body" style="padding:0">
+      <!-- Quotations Tab Content -->
+      <div id="tab-content-quotes">
+        <div class="table-wrap">
+          <table class="data-table">
+            <thead>
+              <tr>
+                <th>Quote #</th>
+                <th>Date</th>
+                <th>Items</th>
+                <th>Total Amount ₹</th>
+                <th>Status</th>
+                <th style="width:130px">Actions</th>
+              </tr>
+            </thead>
+            <tbody id="modal-quotes-tbody">
+              <tr><td colspan="6" class="empty-state">Loading quotations…</td></tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+
+      <!-- Orders Tab Content -->
+      <div id="tab-content-orders" class="hidden">
+        <div class="table-wrap">
+          <table class="data-table">
+            <thead>
+              <tr>
+                <th>Order #</th>
+                <th>Order Date</th>
+                <th>Supplied</th>
+                <th>Total ₹</th>
+                <th>Paid ₹</th>
+                <th>Balance ₹</th>
+                <th>Status</th>
+                <th style="width:100px">Actions</th>
+              </tr>
+            </thead>
+            <tbody id="modal-orders-tbody">
+              <tr><td colspan="8" class="empty-state">Loading orders…</td></tr>
+            </tbody>
+          </table>
+        </div>
       </div>
     </div>
   </div>
@@ -85,6 +149,7 @@
 {% block scripts %}
 <script>
 let allClients = [];
+let currentClientDetail = null;
 
 async function loadClients() {
   const urlParams = new URLSearchParams(window.location.search);
@@ -93,14 +158,9 @@ async function loadClients() {
   try {
     const res = await fetch('/api/clients');
     const data = await res.json();
-    if (Array.isArray(data)) {
-      allClients = data;
-    } else {
-      console.error('Error fetching clients:', data);
-      allClients = [];
-    }
+    allClients = Array.isArray(data) ? data : [];
   } catch (e) {
-    console.error('Network error fetching clients:', e);
+    console.error('Error fetching clients:', e);
     allClients = [];
   }
 
@@ -110,39 +170,32 @@ async function loadClients() {
   if (autoClient && allClients.length) {
     const found = allClients.find(c => c.client_name && c.client_name.toLowerCase().trim() === autoClient.toLowerCase().trim());
     if (found) {
-      openClientHistory(found.client_name, found.client_address);
+      openClientProfile(found.client_name);
     }
   }
 }
 
 function updateKPIs(clients) {
-  const totalClients = clients.length;
-  const totalQuotes = clients.reduce((acc, c) => acc + (c.quote_count || 0), 0);
-  const totalValue = clients.reduce((acc, c) => acc + (c.total_value || 0), 0);
-
-  document.getElementById('kpi-total-clients').textContent = totalClients;
-  document.getElementById('kpi-total-quotes').textContent = totalQuotes;
-  document.getElementById('kpi-total-value').textContent = fmtMoney(totalValue);
+  document.getElementById('kpi-total-clients').textContent = clients.length;
+  document.getElementById('kpi-total-quotes').textContent = clients.reduce((acc, c) => acc + (c.quote_count || 0), 0);
+  document.getElementById('kpi-total-value').textContent = fmtMoney(clients.reduce((acc, c) => acc + (c.total_value || 0), 0));
 }
 
 function renderClients(clients) {
   const tbody = document.getElementById('clients-tbody');
   if (!clients.length) {
-    tbody.innerHTML = '<tr><td colspan="7" class="empty-state">No client records found.</td></tr>';
+    tbody.innerHTML = '<tr><td colspan="6" class="empty-state">No client records found.</td></tr>';
     return;
   }
 
   tbody.innerHTML = clients.map(c => `
-    <tr>
+    <tr class="client-row" onclick="openClientProfile('${escQuote(c.client_name)}')">
       <td><strong>${esc(c.client_name)}</strong></td>
       <td>${esc(c.client_address || '—')}</td>
       <td><span class="badge">${c.quote_count} ${c.quote_count === 1 ? 'quote' : 'quotes'}</span></td>
       <td>${c.accepted_count > 0 ? `<span class="badge badge-success">${c.accepted_count} accepted</span>` : '<span style="color:var(--text-faint)">0</span>'}</td>
       <td><strong>${fmtMoney(c.total_value)}</strong></td>
       <td>${esc(c.last_quote_date || '—')}</td>
-      <td>
-        <button class="btn btn-sm" onclick="openClientHistory('${escQuote(c.client_name)}', '${escQuote(c.client_address || '')}')">View History</button>
-      </td>
     </tr>
   `).join('');
 }
@@ -154,32 +207,55 @@ function filterClients() {
     return;
   }
   const filtered = allClients.filter(c => 
-    c.client_name.toLowerCase().includes(q) || 
+    (c.client_name && c.client_name.toLowerCase().includes(q)) || 
     (c.client_address && c.client_address.toLowerCase().includes(q))
   );
   renderClients(filtered);
 }
 
-async function openClientHistory(clientName, clientAddress) {
+async function openClientProfile(clientName) {
   document.getElementById('modal-client-name').textContent = clientName;
-  document.getElementById('modal-client-address').textContent = clientAddress || '';
+  document.getElementById('modal-client-address').textContent = 'Loading details…';
+  
+  // Reset tabs to quotes
+  switchTab('quotes');
+  
   const modal = document.getElementById('client-modal');
   modal.classList.remove('hidden');
 
-  const tbody = document.getElementById('modal-quotes-tbody');
-  tbody.innerHTML = '<tr><td colspan="6" class="empty-state">Loading quotations…</td></tr>';
+  document.getElementById('modal-quotes-tbody').innerHTML = '<tr><td colspan="6" class="empty-state">Loading quotations…</td></tr>';
+  document.getElementById('modal-orders-tbody').innerHTML = '<tr><td colspan="8" class="empty-state">Loading orders…</td></tr>';
 
-  let quotes = [];
   try {
-    const res = await fetch(`/api/clients/${encodeURIComponent(clientName)}/quotations`);
-    const data = await res.json();
-    if (Array.isArray(data)) quotes = data;
+    const res = await fetch(`/api/clients/${encodeURIComponent(clientName)}/detail`);
+    currentClientDetail = await res.json();
   } catch (e) {
-    console.error('Error loading client quotes:', e);
+    console.error('Error fetching client details:', e);
+    currentClientDetail = { client_name: clientName, summary: {}, quotations: [], orders: [] };
   }
 
+  const detail = currentClientDetail;
+  document.getElementById('modal-client-name').textContent = detail.client_name || clientName;
+  document.getElementById('modal-client-address').textContent = detail.client_address || 'No registered address';
+
+  const sum = detail.summary || {};
+  document.getElementById('stat-quoted').textContent = fmtMoney(sum.total_quoted || 0);
+  document.getElementById('stat-ordered').textContent = fmtMoney(sum.total_ordered || 0);
+  document.getElementById('stat-paid').textContent = fmtMoney(sum.total_paid || 0);
+  document.getElementById('stat-balance').textContent = fmtMoney(sum.total_balance || 0);
+  document.getElementById('stat-balance').style.color = (sum.total_balance > 0) ? 'var(--danger)' : 'var(--text-faint)';
+
+  document.getElementById('badge-quotes-count').textContent = (detail.quotations || []).length;
+  document.getElementById('badge-orders-count').textContent = (detail.orders || []).length;
+
+  renderModalQuotations(detail.quotations || []);
+  renderModalOrders(detail.orders || []);
+}
+
+function renderModalQuotations(quotes) {
+  const tbody = document.getElementById('modal-quotes-tbody');
   if (!quotes.length) {
-    tbody.innerHTML = '<tr><td colspan="6" class="empty-state">No quotations found for this client.</td></tr>';
+    tbody.innerHTML = '<tr><td colspan="6" class="empty-state">No quotations created for this client yet.</td></tr>';
     return;
   }
 
@@ -198,6 +274,53 @@ async function openClientHistory(clientName, clientAddress) {
       </td>
     </tr>
   `).join('');
+}
+
+function renderModalOrders(orders) {
+  const tbody = document.getElementById('modal-orders-tbody');
+  if (!orders.length) {
+    tbody.innerHTML = '<tr><td colspan="8" class="empty-state">No accepted orders placed by this client yet.</td></tr>';
+    return;
+  }
+
+  tbody.innerHTML = orders.map(o => {
+    const pct = o.total_qty > 0 ? Math.round((o.total_supplied / o.total_qty) * 100) : 0;
+    return `
+      <tr>
+        <td><a href="/orders/${o.id}" class="link-sm"><strong>${esc(o.quote_number)}</strong></a></td>
+        <td>${esc((o.created_at || '').split(' ')[0] || '—')}</td>
+        <td><span class="badge ${pct >= 100 ? 'badge-success' : ''}">${pct}%</span></td>
+        <td><strong>${fmtMoney(o.total_amount)}</strong></td>
+        <td>${fmtMoney(o.paid_amount)}</td>
+        <td>${o.balance > 0 ? `<strong style="color:var(--danger)">${fmtMoney(o.balance)}</strong>` : '<span style="color:var(--text-faint)">Paid</span>'}</td>
+        <td>
+          ${o.status === 'completed' ? '<span class="badge badge-success">Completed</span>' : '<span class="badge">Open</span>'}
+        </td>
+        <td class="actions-cell">
+          <a href="/orders/${o.id}" class="btn btn-sm">View Order</a>
+        </td>
+      </tr>
+    `;
+  }).join('');
+}
+
+function switchTab(tab) {
+  const btnQ = document.getElementById('tab-btn-quotes');
+  const btnO = document.getElementById('tab-btn-orders');
+  const contentQ = document.getElementById('tab-content-quotes');
+  const contentO = document.getElementById('tab-content-orders');
+
+  if (tab === 'quotes') {
+    btnQ.classList.add('active');
+    btnO.classList.remove('active');
+    contentQ.classList.remove('hidden');
+    contentO.classList.add('hidden');
+  } else {
+    btnO.classList.add('active');
+    btnQ.classList.remove('active');
+    contentO.classList.remove('hidden');
+    contentQ.classList.add('hidden');
+  }
 }
 
 function closeModal() {

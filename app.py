@@ -725,6 +725,87 @@ def get_client_quotations(cname):
     return jsonify(quotes)
 
 
+@app.route("/api/clients/<path:cname>/detail", methods=["GET"])
+@login_required
+def get_client_detail(cname):
+    conn = get_db()
+    cname_clean = cname.strip()
+
+    q_rows = conn.execute("""
+        SELECT q.id, q.quote_number, q.client_name, q.client_address, q.date, q.status, q.gst_rate, q.cash_discount,
+        COUNT(qi.id) as item_count,
+        COALESCE(SUM(qi.quantity * qi.final_price), 0) as subtotal
+        FROM quotations q
+        LEFT JOIN quotation_items qi ON qi.quotation_id = q.id
+        WHERE LOWER(TRIM(q.client_name)) = LOWER(TRIM(?))
+        GROUP BY q.id, q.quote_number, q.client_name, q.client_address, q.date, q.status, q.gst_rate, q.cash_discount
+        ORDER BY q.id DESC
+    """, (cname_clean,)).fetchall()
+
+    quotes = []
+    total_quoted_val = 0.0
+    for q in q_rows:
+        qd = dict(q)
+        sub = float(qd["subtotal"] or 0)
+        disc = round(sub * 0.01, 2) if qd.get("cash_discount") else 0
+        taxable = sub - disc
+        gst = round(taxable * float(qd.get("gst_rate") or 18) / 100, 2)
+        tot = round(taxable + gst, 2)
+        qd["total"] = tot
+        total_quoted_val += tot
+        quotes.append(qd)
+
+    o_rows = conn.execute("""
+        SELECT o.id, o.quote_number, o.client_name, o.created_at, o.notes, o.quotation_id,
+        COALESCE(SUM(oi.quantity * oi.unit_price), 0) as total_amount,
+        COALESCE(SUM(oi.quantity), 0) as total_qty,
+        COALESCE(SUM(oi.supplied_qty), 0) as total_supplied,
+        (SELECT COALESCE(SUM(op.amount), 0) FROM order_payments op WHERE op.order_id = o.id) as paid_amount
+        FROM orders o
+        LEFT JOIN order_items oi ON oi.order_id = o.id
+        WHERE LOWER(TRIM(o.client_name)) = LOWER(TRIM(?))
+        GROUP BY o.id, o.quote_number, o.client_name, o.created_at, o.notes, o.quotation_id
+        ORDER BY o.id DESC
+    """, (cname_clean,)).fetchall()
+
+    orders = []
+    total_order_val = 0.0
+    total_paid_val = 0.0
+
+    for r in o_rows:
+        od = dict(r)
+        tot = float(od["total_amount"] or 0)
+        paid = float(od["paid_amount"] or 0)
+        supplied = float(od["total_supplied"] or 0)
+        total_qty = float(od["total_qty"] or 0)
+
+        od["balance"] = round(tot - paid, 2)
+        od["status"] = "completed" if (total_qty > 0 and supplied >= total_qty) else "open"
+        orders.append(od)
+
+        total_order_val += tot
+        total_paid_val += paid
+
+    client_address = quotes[0]["client_address"] if (quotes and quotes[0].get("client_address")) else ""
+
+    conn.close()
+
+    return jsonify({
+        "client_name": cname_clean,
+        "client_address": client_address,
+        "summary": {
+            "quote_count": len(quotes),
+            "order_count": len(orders),
+            "total_quoted": round(total_quoted_val, 2),
+            "total_ordered": round(total_order_val, 2),
+            "total_paid": round(total_paid_val, 2),
+            "total_balance": round(total_order_val - total_paid_val, 2)
+        },
+        "quotations": quotes,
+        "orders": orders
+    })
+
+
 @app.route("/api/quotations/next-number", methods=["GET"])
 @login_required
 def next_quote_number():
