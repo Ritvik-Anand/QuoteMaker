@@ -40,6 +40,29 @@ def _compute_totals(quote_items, gst_rate, cash_discount=False):
     return round(subtotal, 2), discount, gst_amount, total
 
 
+def _fmt_inr(val: float) -> str:
+    if val is None:
+        return "0.00"
+    is_neg = val < 0
+    val = abs(val)
+    s = f"{val:.2f}"
+    int_part, dec_part = s.split(".")
+    if len(int_part) <= 3:
+        res = int_part
+    else:
+        last_three = int_part[-3:]
+        rest = int_part[:-3]
+        groups = []
+        while len(rest) > 2:
+            groups.append(rest[-2:])
+            rest = rest[:-2]
+        groups.append(rest)
+        groups.reverse()
+        res = ",".join(groups) + "," + last_three
+    formatted = f"{res}.{dec_part}"
+    return f"−{formatted}" if is_neg else formatted
+
+
 def generate_pdf(quotation: dict, quote_items: list[dict]) -> bytes:
     buffer = io.BytesIO()
     doc = SimpleDocTemplate(
@@ -108,8 +131,8 @@ def generate_pdf(quotation: dict, quote_items: list[dict]) -> bytes:
             Paragraph(item["description"], row_style),
             Paragraph(item.get("unit", "Nos"), row_style_c),
             Paragraph(_fmt_num(item["quantity"]), row_style_c),
-            Paragraph(f"{item['final_price']:,.2f}", row_style_r),
-            Paragraph(f"{amount:,.2f}", row_style_r),
+            Paragraph(_fmt_inr(item["final_price"]), row_style_r),
+            Paragraph(_fmt_inr(amount), row_style_r),
         ])
 
     items_table = Table(table_data, colWidths=col_widths, repeatRows=1)
@@ -135,11 +158,11 @@ def generate_pdf(quotation: dict, quote_items: list[dict]) -> bytes:
     )
     gst_rate = quotation.get("gst_rate", 18)
 
-    totals_data = [["", "Subtotal", f"₹ {subtotal:,.2f}"]]
+    totals_data = [["", "Subtotal", f"₹ {_fmt_inr(subtotal)}"]]
     if cash_discount:
-        totals_data.append(["", "Cash Discount (1%)", f"− ₹ {discount:,.2f}"])
-    totals_data.append(["", f"GST ({gst_rate:.0f}%)", f"₹ {gst_amount:,.2f}"])
-    totals_data.append(["", "TOTAL", f"₹ {total:,.2f}"])
+        totals_data.append(["", "Cash Discount (1%)", f"− ₹ {_fmt_inr(discount)}"])
+    totals_data.append(["", f"GST ({gst_rate:.0f}%)", f"₹ {_fmt_inr(gst_amount)}"])
+    totals_data.append(["", "TOTAL", f"₹ {_fmt_inr(total)}"])
     total_row = len(totals_data) - 1
     totals_table = Table(totals_data, colWidths=[75 * mm, 50 * mm, 52 * mm])
     totals_table.setStyle(TableStyle([
@@ -386,12 +409,12 @@ def generate_payroll_pdf(year: int, month: int, rows: list[dict]) -> bytes:
         row_style_c = ParagraphStyle("tdc", fontName=FONT, fontSize=8, leading=11, alignment=TA_CENTER)
         table_data.append([
             Paragraph(r["employee_name"], row_style),
-            Paragraph(f"{r['monthly_salary']:,.2f}", row_style_r),
+            Paragraph(_fmt_inr(r['monthly_salary']), row_style_r),
             Paragraph(str(r["present_days"]), row_style_c),
             Paragraph(str(r["absent_days"]), row_style_c),
             Paragraph(str(unmarked), row_style_c),
-            Paragraph(f"{r['computed_pay']:,.2f}", row_style_r),
-            Paragraph(f"{r['final_pay']:,.2f}", row_style_r),
+            Paragraph(_fmt_inr(r['computed_pay']), row_style_r),
+            Paragraph(_fmt_inr(r['final_pay']), row_style_r),
             Paragraph(_PAYROLL_STATUS_LABEL.get(r["status"], r["status"]), row_style),
         ])
 
@@ -411,8 +434,8 @@ def generate_payroll_pdf(year: int, month: int, rows: list[dict]) -> bytes:
     story.append(Spacer(1, 4 * mm))
 
     totals_data = [
-        ["", "Total Computed Pay", f"₹ {total_computed:,.2f}"],
-        ["", "Total Final Pay", f"₹ {total_final:,.2f}"],
+        ["", "Total Computed Pay", f"₹ {_fmt_inr(total_computed)}"],
+        ["", "Total Final Pay", f"₹ {_fmt_inr(total_final)}"],
     ]
     totals_table = Table(totals_data, colWidths=[115 * mm, 40 * mm, 45 * mm])
     totals_table.setStyle(TableStyle([
