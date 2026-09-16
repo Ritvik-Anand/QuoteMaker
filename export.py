@@ -141,7 +141,7 @@ def generate_pdf(quotation: dict, quote_items: list[dict]) -> bytes:
     totals_data.append(["", f"GST ({gst_rate:.0f}%)", f"₹ {gst_amount:,.2f}"])
     totals_data.append(["", "TOTAL", f"₹ {total:,.2f}"])
     total_row = len(totals_data) - 1
-    totals_table = Table(totals_data, colWidths=[115 * mm, 35 * mm, 27 * mm])
+    totals_table = Table(totals_data, colWidths=[75 * mm, 50 * mm, 52 * mm])
     totals_table.setStyle(TableStyle([
         ("ALIGN", (1, 0), (-1, -1), "RIGHT"),
         ("FONTNAME", (0, 0), (-1, -1), FONT),
