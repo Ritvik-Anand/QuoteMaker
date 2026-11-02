@@ -2,6 +2,7 @@ import os
 import json
 import re
 import time
+from concurrent.futures import ThreadPoolExecutor
 import pdfplumber
 import io
 from openai import OpenAI
@@ -539,12 +540,14 @@ def parse_catalog_pdf(pdf_bytes: bytes, supplier_name: str) -> list[dict]:
     chunks = _chunk_pages(pages)
     client = OpenAI(api_key=api_key, base_url=DEEPSEEK_BASE_URL)
 
-    all_items: list[dict] = []
-    for chunk in chunks:
-        if not any(p.strip() for p in chunk):
-            continue
-        items = _parse_pages_recursive(client, chunk, supplier_name)
-        all_items.extend(items)
+    # Chunks are independent, so run a few at a time: a long sequential parse
+    # keeps the browser waiting so long that Safari drops the connection.
+    # map() preserves chunk order, so the "keep last occurrence" dedupe below
+    # behaves exactly as it did sequentially.
+    chunks = [c for c in chunks if any(p.strip() for p in c)]
+    with ThreadPoolExecutor(max_workers=4) as pool:
+        results = pool.map(lambda c: _parse_pages_recursive(client, c, supplier_name), chunks)
+        all_items: list[dict] = [item for items in results for item in items]
 
     # Same variant+size sold at more than one pack length (e.g. a 90m carton
     # and a 1000m reel) legitimately produces two items with an identical
