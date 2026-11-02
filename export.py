@@ -1,6 +1,8 @@
 import io
 import os
+import re
 from datetime import datetime
+from xml.sax.saxutils import escape as _xml_escape
 from reportlab.lib.pagesizes import A4
 from reportlab.lib import colors
 from reportlab.lib.units import mm
@@ -27,6 +29,59 @@ BRAND_COLOR = colors.HexColor("#2c5f8a")
 ACCENT_COLOR = colors.HexColor("#eef4fa")
 LIGHT_GRAY = colors.HexColor("#f7f7f7")
 MID_GRAY = colors.HexColor("#dddddd")
+
+
+_BULLET_RE = re.compile(r"^\s*[-*•–]\s+(.*)$")
+_NUMBERED_RE = re.compile(r"^\s*(\d+[.)])\s+(.*)$")
+
+
+def _parse_notes(notes: str):
+    """Split free-text notes into (kind, bullet, text) rows.
+
+    A line starting with - * • or – is a bullet; "1." / "2)" keeps its own
+    number as the marker; anything else is plain text; blank lines become
+    spacers. Typed once in the notes box, rendered the same in PDF and Excel.
+    """
+    rows = []
+    for raw in (notes or "").replace("\r\n", "\n").replace("\r", "\n").split("\n"):
+        line = raw.rstrip()
+        if not line.strip():
+            rows.append(("blank", "", ""))
+            continue
+        m = _BULLET_RE.match(line)
+        if m:
+            rows.append(("item", "•", m.group(1).strip()))
+            continue
+        m = _NUMBERED_RE.match(line)
+        if m:
+            rows.append(("item", m.group(1), m.group(2).strip()))
+            continue
+        rows.append(("text", "", line.strip()))
+    # Trim leading/trailing blanks and collapse runs of them.
+    out = []
+    for r in rows:
+        if r[0] == "blank" and (not out or out[-1][0] == "blank"):
+            continue
+        out.append(r)
+    while out and out[-1][0] == "blank":
+        out.pop()
+    return out
+
+
+def _notes_flowables(notes: str):
+    base = dict(fontName=FONT, fontSize=8, leading=11, textColor=colors.HexColor("#555555"))
+    flow = [Paragraph("Notes:", ParagraphStyle("notes-h", spaceAfter=2, **{**base, "fontName": FONT_BOLD}))]
+    text_style = ParagraphStyle("notes-t", spaceAfter=1, **base)
+    item_style = ParagraphStyle("notes-i", leftIndent=14, bulletIndent=2, spaceAfter=1.5,
+                                bulletFontName=FONT, bulletFontSize=8, **base)
+    for kind, bullet, text in _parse_notes(notes):
+        if kind == "blank":
+            flow.append(Spacer(1, 2 * mm))
+        elif kind == "item":
+            flow.append(Paragraph(_xml_escape(text), item_style, bulletText=bullet))
+        else:
+            flow.append(Paragraph(_xml_escape(text), text_style))
+    return flow
 
 
 def _compute_totals(quote_items, gst_rate, cash_discount=False):
@@ -182,10 +237,7 @@ def generate_pdf(quotation: dict, quote_items: list[dict]) -> bytes:
     if quotation.get("notes"):
         story.append(Spacer(1, 4 * mm))
         story.append(HRFlowable(width="100%", thickness=0.5, color=MID_GRAY, spaceAfter=4))
-        story.append(Paragraph(
-            f"<b>Notes:</b> {quotation['notes']}",
-            ParagraphStyle("notes", fontName=FONT, fontSize=8, textColor=colors.HexColor("#555555"))
-        ))
+        story.extend(_notes_flowables(quotation["notes"]))
 
     # Footer
     story.append(Spacer(1, 6 * mm))
@@ -340,9 +392,17 @@ def generate_excel(quotation: dict, quote_items: list[dict]) -> bytes:
     if quotation.get("notes"):
         ws[f"A{row}"].value = "Notes:"
         ws[f"A{row}"].font = Font(bold=True, size=9)
+        ws[f"A{row}"].alignment = Alignment(vertical="top")
         ws.merge_cells(f"B{row}:G{row}")
-        ws[f"B{row}"].value = quotation["notes"]
+        note_lines = []
+        for kind, bullet, text in _parse_notes(quotation["notes"]):
+            note_lines.append("" if kind == "blank" else (f"{bullet} {text}" if kind == "item" else text))
+        ws[f"B{row}"].value = "\n".join(note_lines)
         ws[f"B{row}"].font = Font(size=9, color="555555")
+        ws[f"B{row}"].alignment = Alignment(wrap_text=True, vertical="top")
+        # Merged cells don't auto-size: ~100 chars fit across B:G, 12pt per line.
+        est_lines = sum(max(1, -(-len(l) // 100)) for l in note_lines) or 1
+        ws.row_dimensions[row].height = max(15, est_lines * 12)
 
     buffer = io.BytesIO()
     wb.save(buffer)

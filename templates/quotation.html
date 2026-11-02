@@ -52,8 +52,12 @@
           <textarea id="client-address" class="input" rows="2" placeholder="Address shown on quotation"></textarea>
         </div>
         <div class="form-group full-width">
-          <label>Notes <span class="opt">(optional)</span></label>
-          <textarea id="quote-notes" class="input" rows="2" placeholder="Terms, validity, payment terms…"></textarea>
+          <label>Notes / Terms &amp; Conditions <span class="opt">(optional)</span></label>
+          <textarea id="quote-notes" class="input" rows="5" placeholder="Terms, validity, payment terms…&#10;Start a line with - or • for bullet points"></textarea>
+          <div style="display:flex;align-items:center;gap:10px;margin-top:6px">
+            <button type="button" class="btn btn-sm" onclick="toggleNoteBullets()">• Bullet selected lines</button>
+            <span style="font-size:11.5px;color:var(--text-muted)">Press Enter on a bullet to continue the list; Enter on an empty bullet ends it.</span>
+          </div>
         </div>
         <div class="form-group full-width">
           <label>Internal Tags <span class="opt">(🔒 visible to you only — never appears in PDF or Excel)</span></label>
@@ -771,6 +775,52 @@ function exportQuote(type) {
   if (!QID) { alert('Save the quotation first.'); return; }
   window.open(`/api/quotations/${QID}/export/${type}`, '_blank');
 }
+
+// ── Notes bullets ─────────────────────────────────────────────────────────────
+// Notes are plain text; the PDF/Excel exports turn lines starting with - * •
+// (or "1.") into real bullets, so this just makes typing them painless.
+const NOTE_BULLET = /^(\s*)([-*•–]|\d+[.)])\s/;
+
+function toggleNoteBullets() {
+  const ta = document.getElementById('quote-notes');
+  const text = ta.value;
+  const start = text.lastIndexOf('\n', ta.selectionStart - 1) + 1;
+  let end = text.indexOf('\n', ta.selectionEnd);
+  if (end === -1) end = text.length;
+  const lines = text.slice(start, end).split('\n');
+  const nonBlank = lines.filter(l => l.trim());
+  const allBulleted = nonBlank.length && nonBlank.every(l => /^\s*[-*•–]\s/.test(l));
+  const out = lines.map(l => {
+    if (!l.trim()) return l;
+    return allBulleted ? l.replace(/^(\s*)[-*•–]\s+/, '$1') : (/^\s*[-*•–]\s/.test(l) ? l : '• ' + l.trimStart());
+  });
+  ta.value = text.slice(0, start) + out.join('\n') + text.slice(end);
+  ta.focus();
+  ta.setSelectionRange(start, start + out.join('\n').length);
+}
+
+document.getElementById('quote-notes').addEventListener('keydown', e => {
+  if (e.key !== 'Enter' || e.shiftKey || e.isComposing) return;
+  const ta = e.target;
+  if (ta.selectionStart !== ta.selectionEnd) return;
+  const pos = ta.selectionStart;
+  const lineStart = ta.value.lastIndexOf('\n', pos - 1) + 1;
+  const line = ta.value.slice(lineStart, pos);
+  const m = line.match(NOTE_BULLET);
+  if (!m) return;
+  e.preventDefault();
+  const marker = m[2];
+  if (line.trim() === marker) {            // empty bullet: end the list
+    ta.value = ta.value.slice(0, lineStart) + ta.value.slice(pos);
+    ta.setSelectionRange(lineStart, lineStart);
+    return;
+  }
+  const num = marker.match(/^(\d+)([.)])$/);
+  const next = num ? `${m[1]}${parseInt(num[1], 10) + 1}${num[2]} ` : `${m[1]}${marker} `;
+  ta.value = ta.value.slice(0, pos) + '\n' + next + ta.value.slice(pos);
+  const caret = pos + 1 + next.length;
+  ta.setSelectionRange(caret, caret);
+});
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 function fmt(n) {
