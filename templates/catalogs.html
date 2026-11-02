@@ -218,7 +218,7 @@ async function doUpload() {
           catalog_id: uploadCatalogId || ''
         })
       });
-      data = await r.json();
+      data = await readJson(r);
     } else {
       progress.innerHTML = '<span class="uploading">⏳ Reading catalog with AI… this may take 1–3 minutes for large catalogs</span>';
       const fd = new FormData();
@@ -226,7 +226,7 @@ async function doUpload() {
       fd.append('catalog_name', catalogName);
       if (uploadCatalogId) fd.append('catalog_id', uploadCatalogId);
       const r = await fetch(`/api/suppliers/${uploadSupplierId}/upload`, {method: 'POST', body: fd});
-      data = await r.json();
+      data = await readJson(r);
     }
 
     if (data.error) {
@@ -237,13 +237,26 @@ async function doUpload() {
       setTimeout(() => { closeModal('modal-upload'); loadSuppliers(); }, 800);
     }
   } catch(e) {
-    progress.innerHTML = '<span class="error-text">❌ Upload failed</span>';
+    progress.innerHTML = `<span class="error-text">❌ Upload failed: ${esc(e.message || String(e))}</span>`;
     btn.disabled = false;
   }
 }
 
+// Vercel answers timeouts / oversize bodies with plain text or HTML rather than
+// our JSON, so surface the status instead of a bare JSON parse error.
+async function readJson(r) {
+  const text = await r.text();
+  try { return JSON.parse(text); }
+  catch (e) {
+    if (r.status === 504) throw new Error('the server timed out reading this catalog (HTTP 504) — try splitting the PDF into smaller parts');
+    if (r.status === 413) throw new Error('file too large for the server (HTTP 413)');
+    if (r.status === 401 || r.status === 403 || r.redirected) throw new Error('session expired or not an admin — sign in again');
+    throw new Error(`unexpected server response (HTTP ${r.status})`);
+  }
+}
+
 async function uploadFileToBlob(file) {
-  const tokenRes = await fetch('/api/blob/upload-token').then(r => r.json());
+  const tokenRes = await fetch('/api/blob/upload-token').then(readJson);
   if (tokenRes.error) throw new Error(tokenRes.error);
   const pathname = `catalogs/${Date.now()}-${encodeURIComponent(file.name)}`;
   const r = await fetch(`${tokenRes.api_base}/${pathname}`, {
@@ -254,8 +267,8 @@ async function uploadFileToBlob(file) {
     },
     body: file
   });
-  const data = await r.json();
-  if (!r.ok || !data.url) throw new Error(data.error?.message || 'Blob upload failed');
+  const data = await readJson(r).catch(() => ({}));
+  if (!r.ok || !data.url) throw new Error(data.error?.message || `file storage upload failed (HTTP ${r.status})`);
   return data.url;
 }
 
