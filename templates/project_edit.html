@@ -18,7 +18,8 @@
     </div>
     <div class="form-group">
       <label>Client Name</label>
-      <input type="text" id="proj-client" class="input" placeholder="Client / Company name"/>
+      <input type="text" id="proj-client" class="input" list="client-options" autocomplete="off" placeholder="Client / Company name"/>
+      <datalist id="client-options"></datalist>
     </div>
     <div class="form-group full-width">
       <label>Notes <span class="opt">(internal only)</span></label>
@@ -145,6 +146,7 @@ async function init() {
   document.getElementById('opt-supplier-filter').innerHTML =
     '<option value="">All suppliers</option>' + allSuppliers.map(s => `<option value="${s.id}">${esc(s.name)}</option>`).join('');
   refreshSupplierDatalists();
+  loadClientOptions();
 
   if (PID) {
     document.getElementById('page-title').textContent = 'Edit Project';
@@ -166,6 +168,15 @@ async function init() {
     }));
   }
   render();
+}
+
+// Same client database the quotation page suggests from; typing a new name is still allowed.
+async function loadClientOptions() {
+  try {
+    const clients = await fetch('/api/clients').then(r => r.json());
+    document.getElementById('client-options').innerHTML =
+      clients.map(c => `<option value="${esc(c.client_name)}"></option>`).join('');
+  } catch (e) { /* suggestions are optional */ }
 }
 
 function refreshSupplierDatalists() {
